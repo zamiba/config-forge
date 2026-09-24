@@ -1,0 +1,160 @@
+{
+  "title": "Settings",
+  "path": "install/config/settings.cfg",
+  "format": "godot",
+  "sections": [
+    {
+      "title": "Video",
+      "fields": [
+        {
+          "pointer": "video.mode",
+          "kind": "int",
+          "widget": "select",
+          "label": "Window mode",
+          "options": [
+            {
+              "label": "Windowed",
+              "value": 0
+            },
+            {
+              "label": "Maximised",
+              "value": 1
+            },
+            {
+              "label": "Borderless",
+              "value": 2
+            },
+            {
+              "label": "Fullscreen",
+              "value": 3
+            }
+          ]
+        },
+        {
+          "pointer": "video.multiplier",
+          "kind": "int",
+          "widget": "number",
+          "label": "Window scale",
+          "help": "Integer multiple of the game's native resolution.",
+          "min": 1,
+          "max": 8,
+          "step": 1
+        },
+        {
+          "pointer": "video.vsync",
+          "kind": "int",
+          "widget": "toggle",
+          "label": "V-sync",
+          "on": 1,
+          "off": 0
+        },
+        {
+          "pointer": "video.drop_shadows",
+          "kind": "int",
+          "widget": "toggle",
+          "label": "Drop shadows",
+          "on": 1,
+          "off": 0
+        }
+      ]
+    },
+    {
+      "title": "Audio",
+      "fields": [
+        {
+          "pointer": "audio.master",
+          "kind": "int",
+          "widget": "slider",
+          "label": "Master volume",
+          "min": 0,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "pointer": "audio.music",
+          "kind": "int",
+          "widget": "slider",
+          "label": "Music volume",
+          "min": 0,
+          "max": 10,
+          "step": 1
+        },
+        {
+          "pointer": "audio.athletic_bgm",
+          "kind": "int",
+          "widget": "toggle",
+          "label": "Athletic theme",
+          "on": 1,
+          "off": 0
+        }
+      ]
+    },
+    {
+      "title": "Game",
+      "fields": [
+        {
+          "pointer": "game.campaign",
+          "kind": "string",
+          "widget": "select",
+          "label": "Campaign",
+          "options": [
+            {
+              "label": "Super Mario Bros.",
+              "value": "SMB1"
+            },
+            {
+              "label": "The Lost Levels",
+              "value": "SMBLL"
+            }
+          ]
+        },
+        {
+          "pointer": "game.lang",
+          "kind": "string",
+          "widget": "text",
+          "label": "Language code"
+        }
+      ]
+    },
+    {
+      "title": "Controller",
+      "fields": [
+        {
+          "pointer": "controller.deadzone",
+          "kind": "float",
+          "widget": "slider",
+          "label": "Stick deadzone",
+          "min": 0,
+          "max": 1,
+          "step": 0.05
+        }
+      ]
+    },
+    {
+      "title": "Editor",
+      "fields": [
+        {
+          "pointer": "editor.seen_guide",
+          "kind": "bool",
+          "widget": "toggle",
+          "label": "Guide seen"
+        },
+        {
+          "pointer": "editor.autosave_min_timer",
+          "kind": "int",
+          "widget": "number",
+          "label": "Autosave interval (minutes)",
+          "min": 1,
+          "max": 60
+        },
+        {
+          "pointer": "editor.autosave_before_test",
+          "kind": "bool",
+          "widget": "toggle",
+          "label": "Autosave before testing",
+          "sinceVersion": "1.0.2"
+        }
+      ]
+    }
+  ]
+}

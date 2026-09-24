@@ -1,0 +1,356 @@
+{
+  "title": "Options",
+  "path": "install/options.lua",
+  "format": "luaTable",
+  "sections": [
+    {
+      "title": "Text and battles",
+      "fields": [
+        {
+          "pointer": "textSpeed",
+          "kind": "int",
+          "widget": "select",
+          "label": "Text speed",
+          "options": [
+            {
+              "label": "Fast",
+              "value": 1
+            },
+            {
+              "label": "Medium",
+              "value": 3
+            },
+            {
+              "label": "Slow",
+              "value": 5
+            }
+          ]
+        },
+        {
+          "pointer": "animations",
+          "kind": "bool",
+          "widget": "toggle",
+          "label": "Battle animations"
+        },
+        {
+          "pointer": "battleStyle",
+          "kind": "string",
+          "widget": "select",
+          "label": "Battle style",
+          "options": [
+            {
+              "label": "Shift",
+              "value": "shift"
+            },
+            {
+              "label": "Set",
+              "value": "set"
+            }
+          ]
+        },
+        {
+          "pointer": "battleLayout",
+          "kind": "string",
+          "widget": "select",
+          "label": "Battle layout",
+          "help": "Wide is 304\u00d7144; OG is the original 160\u00d7144 composition.",
+          "options": [
+            {
+              "label": "OG",
+              "value": "og"
+            },
+            {
+              "label": "Wide",
+              "value": "wide"
+            }
+          ]
+        },
+        {
+          "pointer": "battleFit",
+          "kind": "string",
+          "widget": "select",
+          "label": "Battle size",
+          "options": [
+            {
+              "label": "Fixed",
+              "value": "fixed"
+            },
+            {
+              "label": "Fill",
+              "value": "fill"
+            }
+          ]
+        },
+        {
+          "pointer": "battleHud",
+          "kind": "string",
+          "widget": "select",
+          "label": "Battle HUD",
+          "help": "Extended applies only to the wide layout.",
+          "options": [
+            {
+              "label": "Standard",
+              "value": "standard"
+            },
+            {
+              "label": "Extended",
+              "value": "extended"
+            }
+          ]
+        },
+        {
+          "pointer": "battleBg",
+          "kind": "string",
+          "widget": "select",
+          "label": "Battle background",
+          "options": [
+            {
+              "label": "White",
+              "value": "white"
+            },
+            {
+              "label": "Black",
+              "value": "black"
+            },
+            {
+              "label": "World",
+              "value": "world"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Audio",
+      "fields": [
+        {
+          "pointer": "musicVol",
+          "kind": "int",
+          "widget": "slider",
+          "label": "Music volume",
+          "min": 0,
+          "max": 7,
+          "step": 1
+        },
+        {
+          "pointer": "sfxVol",
+          "kind": "int",
+          "widget": "slider",
+          "label": "Sound volume",
+          "min": 0,
+          "max": 7,
+          "step": 1
+        },
+        {
+          "pointer": "musicFilter",
+          "kind": "int",
+          "widget": "select",
+          "label": "Music filter",
+          "options": [
+            {
+              "label": "Off",
+              "value": 0
+            },
+            {
+              "label": "1\u00d7",
+              "value": 1
+            },
+            {
+              "label": "2\u00d7",
+              "value": 2
+            },
+            {
+              "label": "3\u00d7",
+              "value": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Display",
+      "fields": [
+        {
+          "pointer": "uiLayout",
+          "kind": "string",
+          "widget": "select",
+          "label": "UI layout",
+          "options": [
+            {
+              "label": "Centered",
+              "value": "centered"
+            },
+            {
+              "label": "Dynamic",
+              "value": "dynamic"
+            }
+          ]
+        },
+        {
+          "pointer": "videoMode",
+          "kind": "string",
+          "widget": "select",
+          "label": "Window mode",
+          "options": [
+            {
+              "label": "Windowed",
+              "value": "windowed"
+            },
+            {
+              "label": "Borderless",
+              "value": "borderless"
+            }
+          ]
+        },
+        {
+          "pointer": "faithfulRes",
+          "kind": "int",
+          "widget": "select",
+          "label": "Lock to exact scale",
+          "help": "Locks the window to a whole multiple of 160\u00d7144.",
+          "options": [
+            {
+              "label": "Off",
+              "value": 0
+            },
+            {
+              "label": "1\u00d7",
+              "value": 1
+            },
+            {
+              "label": "2\u00d7",
+              "value": 2
+            },
+            {
+              "label": "3\u00d7",
+              "value": 3
+            },
+            {
+              "label": "4\u00d7",
+              "value": 4
+            }
+          ]
+        },
+        {
+          "pointer": "fpsCap",
+          "kind": "int",
+          "widget": "number",
+          "label": "Frame rate cap",
+          "min": 30,
+          "max": 240
+        },
+        {
+          "pointer": "voidFill",
+          "kind": "string",
+          "widget": "select",
+          "label": "Beyond the map edge",
+          "options": [
+            {
+              "label": "Trees",
+              "value": "trees"
+            },
+            {
+              "label": "Water",
+              "value": "water"
+            },
+            {
+              "label": "Black",
+              "value": "black"
+            }
+          ]
+        },
+        {
+          "pointer": "performance",
+          "kind": "string",
+          "widget": "select",
+          "label": "Graphics tier",
+          "options": [
+            {
+              "label": "Auto",
+              "value": "auto"
+            },
+            {
+              "label": "High",
+              "value": "high"
+            },
+            {
+              "label": "Balanced",
+              "value": "balanced"
+            },
+            {
+              "label": "Low",
+              "value": "low"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Interface",
+      "fields": [
+        {
+          "pointer": "hotbar",
+          "kind": "bool",
+          "widget": "toggle",
+          "label": "Hotbar"
+        },
+        {
+          "pointer": "safeMode",
+          "kind": "bool",
+          "widget": "toggle",
+          "label": "Safe mode"
+        },
+        {
+          "pointer": "dateFormat",
+          "kind": "string",
+          "widget": "select",
+          "label": "Date format",
+          "options": [
+            {
+              "label": "Device",
+              "value": "device"
+            },
+            {
+              "label": "D/M/Y",
+              "value": "dmy"
+            },
+            {
+              "label": "M/D/Y",
+              "value": "mdy"
+            },
+            {
+              "label": "Y-M-D",
+              "value": "ymd"
+            }
+          ]
+        },
+        {
+          "pointer": "timeFormat",
+          "kind": "string",
+          "widget": "select",
+          "label": "Time format",
+          "options": [
+            {
+              "label": "Device",
+              "value": "device"
+            },
+            {
+              "label": "24-hour",
+              "value": "24h"
+            },
+            {
+              "label": "12-hour",
+              "value": "12h"
+            }
+          ]
+        },
+        {
+          "pointer": "touchControls.enabled",
+          "kind": "bool",
+          "widget": "toggle",
+          "label": "On-screen controls"
+        }
+      ]
+    }
+  ]
+}
