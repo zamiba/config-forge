@@ -20,6 +20,11 @@ import (
 type godotDoc struct {
 	buf     []byte
 	entries []godotEntry
+	// sectionEnd is the offset a new key for each section is inserted at: just
+	// past that section's last entry, or just past its header when it has none.
+	// Held per section because a section's keys are contiguous in the file and a
+	// new one belongs with them rather than at the end of the file.
+	sectionEnd map[string]int
 }
 
 type godotEntry struct {
@@ -38,7 +43,7 @@ func (e godotEntry) path() Path {
 }
 
 func parseGodot(data []byte) (Doc, error) {
-	d := &godotDoc{buf: append([]byte(nil), data...)}
+	d := &godotDoc{buf: append([]byte(nil), data...), sectionEnd: map[string]int{}}
 	s := string(data)
 	section := ""
 
@@ -57,6 +62,7 @@ func parseGodot(data []byte) (Doc, error) {
 			// Blank or comment: carried through untouched.
 		case strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]"):
 			section = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			d.sectionEnd[section] = lineEnd
 		default:
 			eq := strings.IndexByte(line, '=')
 			if eq < 0 {
@@ -80,6 +86,7 @@ func parseGodot(data []byte) (Doc, error) {
 				return nil, fmt.Errorf("%s=%s: %w", key, strings.TrimSpace(line[eq+1:]), err)
 			}
 			d.entries = append(d.entries, godotEntry{section: section, key: key, start: valStart, end: valEnd})
+			d.sectionEnd[section] = valEnd
 			if valEnd > lineEnd {
 				// A multi-line literal: resume after it.
 				i = valEnd
@@ -218,6 +225,71 @@ func (d *godotDoc) Set(p Path, v Value) error {
 
 // godotValue classifies a literal. Anything that is not a plain scalar, or a
 // string carrying an escape this package does not reproduce exactly, is opaque.
+// sectionOf splits a path into its section and key. A one-element path is a key
+// in the unnamed section above the first header.
+func godotSectionKey(p Path) (string, string, bool) {
+	switch len(p) {
+	case 1:
+		return "", p[0], true
+	case 2:
+		return p[0], p[1], true
+	}
+	return "", "", false
+}
+
+func (d *godotDoc) CanCreate(p Path) bool {
+	section, key, ok := godotSectionKey(p)
+	if !ok || key == "" || d.find(p) >= 0 {
+		return false
+	}
+	_, exists := d.sectionEnd[section]
+	return exists
+}
+
+func (d *godotDoc) Create(p Path, v Value) error {
+	section, key, ok := godotSectionKey(p)
+	if !ok || key == "" {
+		return fmt.Errorf("%w: %s", ErrNoSuchPath, p)
+	}
+	if d.find(p) >= 0 {
+		return fmt.Errorf("%w: %s", ErrAlreadyPresent, p)
+	}
+	at, exists := d.sectionEnd[section]
+	if !exists {
+		return fmt.Errorf("%w: [%s]", ErrNoContainer, section)
+	}
+	lit, err := godotLiteral(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", p, err)
+	}
+
+	// Inserted on its own line after the section's last entry, in the form the
+	// platform's own writer uses: key=value, no spaces.
+	line := "\n" + key + "=" + lit
+	buf := make([]byte, 0, len(d.buf)+len(line))
+	buf = append(buf, d.buf[:at]...)
+	buf = append(buf, line...)
+	buf = append(buf, d.buf[at:]...)
+	d.buf = buf
+
+	delta := len(line)
+	valStart := at + len("\n") + len(key) + len("=")
+	for i := range d.entries {
+		if d.entries[i].start >= at {
+			d.entries[i].start += delta
+			d.entries[i].end += delta
+		}
+	}
+	for s, end := range d.sectionEnd {
+		if end >= at && s != section {
+			d.sectionEnd[s] = end + delta
+		}
+	}
+	d.entries = append(d.entries, godotEntry{section: section, key: key, start: valStart, end: valStart + len(lit)})
+	d.sectionEnd[section] = valStart + len(lit)
+	return nil
+}
+
 func godotValue(lit string) Value {
 	v := Value{Raw: lit}
 	switch lit {

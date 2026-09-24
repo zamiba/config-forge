@@ -24,13 +24,15 @@
               "label": "Slow",
               "value": 5
             }
-          ]
+          ],
+          "default": 3
         },
         {
           "pointer": "animations",
           "kind": "bool",
           "widget": "toggle",
-          "label": "Battle animations"
+          "label": "Battle animations",
+          "default": true
         },
         {
           "pointer": "battleStyle",
@@ -46,7 +48,8 @@
               "label": "Set",
               "value": "set"
             }
-          ]
+          ],
+          "default": "shift"
         },
         {
           "pointer": "battleLayout",
@@ -63,7 +66,8 @@
               "label": "Wide",
               "value": "wide"
             }
-          ]
+          ],
+          "default": "og"
         },
         {
           "pointer": "battleFit",
@@ -79,7 +83,8 @@
               "label": "Fill",
               "value": "fill"
             }
-          ]
+          ],
+          "default": "fixed"
         },
         {
           "pointer": "battleHud",
@@ -96,7 +101,8 @@
               "label": "Extended",
               "value": "extended"
             }
-          ]
+          ],
+          "default": "standard"
         },
         {
           "pointer": "battleBg",
@@ -116,7 +122,8 @@
               "label": "World",
               "value": "world"
             }
-          ]
+          ],
+          "default": "white"
         }
       ]
     },
@@ -130,7 +137,8 @@
           "label": "Music volume",
           "min": 0,
           "max": 7,
-          "step": 1
+          "step": 1,
+          "default": 7
         },
         {
           "pointer": "sfxVol",
@@ -139,7 +147,8 @@
           "label": "Sound volume",
           "min": 0,
           "max": 7,
-          "step": 1
+          "step": 1,
+          "default": 7
         },
         {
           "pointer": "musicFilter",
@@ -163,7 +172,8 @@
               "label": "3\u00d7",
               "value": 3
             }
-          ]
+          ],
+          "default": 0
         }
       ]
     },
@@ -184,7 +194,8 @@
               "label": "Dynamic",
               "value": "dynamic"
             }
-          ]
+          ],
+          "default": "centered"
         },
         {
           "pointer": "videoMode",
@@ -200,7 +211,8 @@
               "label": "Borderless",
               "value": "borderless"
             }
-          ]
+          ],
+          "default": "windowed"
         },
         {
           "pointer": "faithfulRes",
@@ -229,7 +241,8 @@
               "label": "4\u00d7",
               "value": 4
             }
-          ]
+          ],
+          "default": 0
         },
         {
           "pointer": "fpsCap",
@@ -237,7 +250,8 @@
           "widget": "number",
           "label": "Frame rate cap",
           "min": 30,
-          "max": 240
+          "max": 240,
+          "default": 60
         },
         {
           "pointer": "voidFill",
@@ -257,7 +271,8 @@
               "label": "Black",
               "value": "black"
             }
-          ]
+          ],
+          "default": "trees"
         },
         {
           "pointer": "performance",
@@ -281,7 +296,8 @@
               "label": "Low",
               "value": "low"
             }
-          ]
+          ],
+          "default": "auto"
         }
       ]
     },
@@ -292,13 +308,15 @@
           "pointer": "hotbar",
           "kind": "bool",
           "widget": "toggle",
-          "label": "Hotbar"
+          "label": "Hotbar",
+          "default": true
         },
         {
           "pointer": "safeMode",
           "kind": "bool",
           "widget": "toggle",
-          "label": "Safe mode"
+          "label": "Safe mode",
+          "default": false
         },
         {
           "pointer": "dateFormat",
@@ -322,7 +340,8 @@
               "label": "Y-M-D",
               "value": "ymd"
             }
-          ]
+          ],
+          "default": "device"
         },
         {
           "pointer": "timeFormat",
@@ -342,13 +361,15 @@
               "label": "12-hour",
               "value": "12h"
             }
-          ]
+          ],
+          "default": "device"
         },
         {
           "pointer": "touchControls.enabled",
           "kind": "bool",
           "widget": "toggle",
-          "label": "On-screen controls"
+          "label": "On-screen controls",
+          "default": true
         }
       ]
     }

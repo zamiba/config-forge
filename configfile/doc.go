@@ -49,6 +49,15 @@ var (
 	// and must be presented as read-only rather than guessed at.
 	ErrUnsupportedValue = errors.New("configfile: this value's kind cannot be rewritten")
 
+	// ErrAlreadyPresent is returned by Create for a path the file already holds.
+	// Set is what changes an existing value.
+	ErrAlreadyPresent = errors.New("configfile: the file already holds this path")
+
+	// ErrNoContainer is returned by Create when the section or table the path
+	// belongs to is not in the file. Adding it would mean adding structure, which
+	// this package does not do.
+	ErrNoContainer = errors.New("configfile: the section or table this path belongs to is not in the file")
+
 	// ErrKindMismatch is returned by Set when the value's kind differs from what
 	// the file already holds at that path. A program reads its config into typed
 	// fields, so turning its [1024, 960] into a string, or its 1 into true, can
@@ -152,6 +161,23 @@ type Doc interface {
 	// is a kind this package will not rewrite.
 	Set(Path, Value) error
 
+	// Create adds a value the file does not hold yet. It adds a leaf into a
+	// container that already exists and never creates the container: a program
+	// reads its config into a fixed set of sections, and one it does not
+	// recognise can break its load outright, while a key it does not recognise
+	// inside a section it does sits there harmlessly. CanCreate reports in
+	// advance whether a given path is addable, so a caller can present a setting
+	// as editable only when writing it would actually work.
+	//
+	// Create is for a setting the caller already knows about — one a schema
+	// names, with a default the program itself would use. It is not a way to put
+	// arbitrary keys into someone else's file.
+	Create(Path, Value) error
+
+	// CanCreate reports whether a path the file lacks could be added: true when
+	// its container is present, false when adding it would mean adding structure.
+	CanCreate(Path) bool
+
 	// Paths lists every value the file contains, in the order it declares them.
 	// It is what a host uses to report a schema field that no longer exists.
 	Paths() []Path
@@ -206,3 +232,11 @@ func (emptyDoc) Bytes() []byte          { return nil }
 func (emptyDoc) Set(p Path, _ Value) error {
 	return fmt.Errorf("%w: %s", ErrNoSuchPath, p)
 }
+
+// Nothing can be added to a file that is not there: there is no container to add
+// it to, and creating one would be creating the file.
+func (emptyDoc) Create(p Path, _ Value) error {
+	return fmt.Errorf("%w: %s", ErrNoContainer, p)
+}
+
+func (emptyDoc) CanCreate(Path) bool { return false }

@@ -51,7 +51,7 @@ Every uncertainty resolves to *refuse and report*, never to *write and hope*:
 |---|---|
 | Value is an array, a dictionary, a `Vector2(…)` | Readable as `KindOpaque` with its literal; `Set` refuses |
 | A string carries an escape this package would not reproduce exactly | Same — readable, not rewritable |
-| `Set` on a path the file does not contain | `ErrNoSuchPath`. Creating structure is the host's call, not a guess |
+| `Set` on a path the file does not contain | `ErrNoSuchPath`. `Create` adds a leaf into an existing container; it never adds the container |
 | `Set` with a kind the file does not hold there | `ErrKindMismatch` — a program's `[1024, 960]` never becomes a string |
 | Schema names a setting the file has lost, or whose type changed | `Resolve` marks it uneditable and says why |
 
@@ -128,12 +128,36 @@ value, whether the setting is present, whether it is editable, and if not, why.
 slider's bounds, a toggle's two values — so a host cannot skip them by reaching for
 the `Doc` directly.
 
+## Settings a program has not written yet
+
+A config holds only what its program has bothered to write, which for a program
+whose defaults grew between releases is a fraction of what it reads. A field can
+declare a `default` — **the program's own** fallback value, not one invented here —
+and then:
+
+- `Resolve` reports the setting as editable, with `Unset` marking that the value
+  shown is what the program would use rather than something it recorded.
+- `WriteField` adds the key when it is saved.
+
+Recording a default changes nothing about how the program behaves, since it is the
+value already in force. What it buys is a file that holds every setting.
+
+`Create` adds a **leaf into a container that already exists, and never the container
+itself.** A program reads its config into a fixed set of sections, and one it does
+not recognise can break that read outright, while an unknown key inside a section it
+does recognise is loaded, written back and ignored. `CanCreate` answers the same
+question in advance, so a host offers a setting as editable only where writing it
+would work. A field with no default is never created: the schema does not claim to
+know what the program does, so nothing is guessed.
+
 ## What this package will not do
 
 - **Draw anything.** Widgets are names.
 - **Resolve paths.** `File.Path` is spelled as the program's own declaration spells
   it. Turning that into somewhere on disk is the host's job, and the host is the
   one that knows about profiles, storage units and per-platform folders.
+- **Author a file.** It adds settings inside a config file the program created; it
+  does not create the file, or a section or table within one.
 - **Decide when to write.** A program that is running owns its config and may
   rewrite it at any moment. Refusing to edit a config while its program runs, and
   re-reading afterwards, is the host's responsibility.

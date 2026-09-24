@@ -87,6 +87,17 @@ type Field struct {
 	// Options are the choices for a select or a radio group.
 	Options []Option `json:"options,omitempty"`
 
+	// Default is the value the *program* uses when the setting is absent from its
+	// config — not a value PortForge invents. It makes a setting the program has
+	// not written yet editable anyway: the control shows what the program would
+	// use, and saving a change adds the key.
+	//
+	// It has to match what the program actually does, or the page states
+	// something untrue about a setting nobody has touched. Take it from the
+	// program's own source, and bound it with SinceVersion/UntilVersion when a
+	// release changes it.
+	Default *Value `json:"default,omitempty"`
+
 	// Min, Max and Step bound a number or a slider. A slider needs both bounds;
 	// a number field may have neither.
 	Min  *float64 `json:"min,omitempty"`
@@ -246,6 +257,9 @@ func Validate(f File) []error {
 				bad("%s has no label", where)
 			}
 			if fl.ReadOnly {
+				if fl.Default != nil {
+					bad("%s: a read-only field is never written, so a default would never be used", where)
+				}
 				errs = append(errs, validateReadOnly(where, fl)...)
 				continue
 			}
@@ -356,6 +370,16 @@ func validateWidget(where string, fl Field, kind configfile.Kind) []error {
 	}
 	if fl.Unit != "" && fl.Widget != WidgetNumber && fl.Widget != WidgetSlider {
 		bad("%s: a unit belongs to a number or a slider, not a %s", where, fl.Widget)
+	}
+	// A default is written like any other value, so it has to be one the field
+	// would accept. A default the field's own rules reject would be offered and
+	// then refused on save.
+	if fl.Default != nil {
+		if fl.Default.V.Kind != kind {
+			bad("%s: the default is a %v but the file holds %s", where, fl.Default.V.Kind, fl.Kind)
+		} else if err := checkFieldValue(fl, fl.Default.V); err != nil {
+			bad("%s: the default is not a value this field accepts: %v", where, err)
+		}
 	}
 	return errs
 }

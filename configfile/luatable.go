@@ -25,6 +25,9 @@ import (
 type luaDoc struct {
 	buf     []byte
 	entries []luaEntry
+	// The root table's span, which has no path of its own but is the container a
+	// top-level key is added to.
+	rootStart, rootEnd int
 }
 
 type luaEntry struct {
@@ -49,14 +52,19 @@ func parseLuaTable(data []byte) (Doc, error) {
 	if p.peek() != '{' {
 		return nil, fmt.Errorf("`return` must be followed by a table")
 	}
+	rootStart := p.pos
 	if err := p.value(nil); err != nil {
 		return nil, err
 	}
+	rootEnd := p.pos
 	p.skip()
 	if p.pos < len(p.s) {
 		return nil, fmt.Errorf("unexpected content at byte %d", p.pos)
 	}
-	return &luaDoc{buf: append([]byte(nil), data...), entries: p.out}, nil
+	return &luaDoc{
+		buf: append([]byte(nil), data...), entries: p.out,
+		rootStart: rootStart, rootEnd: rootEnd,
+	}, nil
 }
 
 func (p *luaParser) peek() byte {
@@ -289,7 +297,156 @@ func (d *luaDoc) Set(p Path, v Value) error {
 			d.entries[j].end += delta
 		}
 	}
+	// The root table encloses every edit, so its end moves too. Missing this left
+	// the root's span stale after any Set, and Create then measured the closing
+	// brace from the wrong offset and added the key outside the table.
+	if d.rootStart > e.start {
+		d.rootStart += delta
+	}
+	if d.rootEnd >= e.end {
+		d.rootEnd += delta
+	}
 	return nil
+}
+
+// container returns the span of the table a path would be added to, and whether
+// it is there. An empty parent path is the root table.
+func (d *luaDoc) container(p Path) (int, int, bool) {
+	if len(p) <= 1 {
+		return d.rootStart, d.rootEnd, d.rootEnd > d.rootStart
+	}
+	i := d.find(p[:len(p)-1])
+	if i < 0 {
+		return 0, 0, false
+	}
+	e := d.entries[i]
+	if e.end-e.start < 2 || d.buf[e.start] != '{' {
+		// The parent is there but is not a table, so nothing can be added under
+		// it without replacing what it is.
+		return 0, 0, false
+	}
+	return e.start, e.end, true
+}
+
+func (d *luaDoc) CanCreate(p Path) bool {
+	if len(p) == 0 || p[len(p)-1] == "" || d.find(p) >= 0 {
+		return false
+	}
+	_, _, ok := d.container(p)
+	return ok
+}
+
+func (d *luaDoc) Create(p Path, v Value) error {
+	if len(p) == 0 || p[len(p)-1] == "" {
+		return fmt.Errorf("%w: %s", ErrNoSuchPath, p)
+	}
+	if d.find(p) >= 0 {
+		return fmt.Errorf("%w: %s", ErrAlreadyPresent, p)
+	}
+	start, end, ok := d.container(p)
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrNoContainer, Path(p[:len(p)-1]))
+	}
+	lit, err := luaLiteral(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", p, err)
+	}
+	assign := luaKey(p[len(p)-1]) + " = " + lit
+
+	// The closing brace is the anchor. When it sits on its own line the entry is
+	// added as a line above it, matching the writer's own layout; when the table
+	// is written inline it is added inline too, rather than reformatting a table
+	// the program wrote.
+	brace := end - 1
+	lineStart := brace
+	for lineStart > start && d.buf[lineStart-1] != '\n' {
+		lineStart--
+	}
+	onlyIndent := true
+	for i := lineStart; i < brace; i++ {
+		if d.buf[i] != ' ' && d.buf[i] != '\t' {
+			onlyIndent = false
+			break
+		}
+	}
+
+	var text string
+	var valueOffset int
+	if onlyIndent {
+		indent := string(d.buf[lineStart:brace])
+		text = indent + "  " + assign + ",\n"
+		valueOffset = len(indent) + 2 + len(assign) - len(lit)
+		brace = lineStart
+	} else {
+		// Inline: insert after the last content rather than against the brace, so
+		// the spacing the program wrote is left as it is instead of gaining a gap
+		// before the comma.
+		insertAt := end - 1
+		for insertAt > start+1 {
+			if c := d.buf[insertAt-1]; c == ' ' || c == '\t' {
+				insertAt--
+				continue
+			}
+			break
+		}
+		if insertAt == start+1 {
+			// An empty table has nothing to follow, so the entry brings its own
+			// spacing on both sides.
+			text = " " + assign + " "
+			valueOffset = 1 + len(assign) - len(lit)
+		} else {
+			text = ", " + assign
+			valueOffset = 2 + len(assign) - len(lit)
+		}
+		brace = insertAt
+	}
+
+	buf := make([]byte, 0, len(d.buf)+len(text))
+	buf = append(buf, d.buf[:brace]...)
+	buf = append(buf, text...)
+	buf = append(buf, d.buf[brace:]...)
+	d.buf = buf
+
+	delta := len(text)
+	for i := range d.entries {
+		switch {
+		case d.entries[i].start >= brace:
+			d.entries[i].start += delta
+			d.entries[i].end += delta
+		case d.entries[i].end > brace:
+			// Strictly past the insertion point, so this entry encloses it. One
+			// that merely ends *at* it is the preceding sibling and stays put.
+			d.entries[i].end += delta
+		}
+	}
+	if d.rootStart >= brace {
+		d.rootStart += delta
+	}
+	if d.rootEnd > brace {
+		d.rootEnd += delta
+	}
+	valStart := brace + valueOffset
+	d.entries = append(d.entries, luaEntry{p: append(Path(nil), p...), start: valStart, end: valStart + len(lit)})
+	return nil
+}
+
+// luaKey renders a key: a bare identifier where the grammar allows one, and a
+// bracketed string otherwise, which is what the program's own writer does.
+func luaKey(k string) string {
+	bare := k != ""
+	for i := 0; i < len(k); i++ {
+		c := k[i]
+		ok := c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || (i > 0 && c >= '0' && c <= '9')
+		if !ok {
+			bare = false
+			break
+		}
+	}
+	if bare {
+		return k
+	}
+	lit, _ := luaLiteral(Value{Kind: KindString, Str: k})
+	return "[" + lit + "]"
 }
 
 func luaValue(lit string) Value {

@@ -167,8 +167,30 @@ func TestResolveReportsAFileThatHasMovedOn(t *testing.T) {
 }
 
 func TestVersionBoundsLimitFields(t *testing.T) {
-	f, d, _ := load(t)
-	versions := []string{"1.0.0", "1.0.1", "1.0.2"}
+	// Built here rather than taken from the catalog-shaped testdata: a real schema
+	// covers every release its spec declares, and a bound exists only for a setting
+	// that genuinely arrived or went away, so the fixtures carry none to borrow.
+	const in = `{
+	  "title": "Settings", "path": "a.cfg", "format": "godot",
+	  "sections": [{ "title": "S", "fields": [
+	    { "pointer": "a.always", "kind": "int", "widget": "number", "label": "Always" },
+	    { "pointer": "a.since", "kind": "int", "widget": "number", "label": "Since", "sinceVersion": "1.1" },
+	    { "pointer": "a.until", "kind": "int", "widget": "number", "label": "Until", "untilVersion": "1.1" }
+	  ]}]
+	}`
+	var f File
+	if err := json.Unmarshal([]byte(in), &f); err != nil {
+		t.Fatal(err)
+	}
+	if errs := Validate(f); len(errs) > 0 {
+		t.Fatalf("schema should be valid: %v", errs)
+	}
+	d, err := configfile.Parse([]byte("[a]\nalways=1\nsince=1\nuntil=1\n"), configfile.FormatGodot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	versions := []string{"1.0", "1.1", "1.2"}
 	has := func(version, pointer string) bool {
 		for _, sec := range Resolve(d, f, version, versions) {
 			for _, fl := range sec.Fields {
@@ -179,20 +201,28 @@ func TestVersionBoundsLimitFields(t *testing.T) {
 		}
 		return false
 	}
-	if has("1.0.1", "editor.autosave_before_test") {
-		t.Error("a field since 1.0.2 should not appear on 1.0.1")
+	for _, tc := range []struct {
+		version, pointer string
+		want             bool
+	}{
+		{"1.0", "a.always", true}, {"1.2", "a.always", true},
+		{"1.0", "a.since", false}, {"1.1", "a.since", true}, {"1.2", "a.since", true},
+		{"1.0", "a.until", true}, {"1.1", "a.until", true}, {"1.2", "a.until", false},
+	} {
+		if got := has(tc.version, tc.pointer); got != tc.want {
+			t.Errorf("%s on %s = %v, want %v", tc.pointer, tc.version, got, tc.want)
+		}
 	}
-	if !has("1.0.2", "editor.autosave_before_test") {
-		t.Error("a field since 1.0.2 should appear on 1.0.2")
+	// An unknown version cannot be placed, so nothing is filtered out by guesswork.
+	if !has("2.0", "a.since") {
+		t.Error("a version not in the list should not have its fields filtered")
 	}
-	if !has("1.0.1", "video.mode") {
-		t.Error("an unbounded field should appear on every release")
-	}
+
 	if errs := ValidateAgainstVersions(f, versions); len(errs) > 0 {
-		t.Errorf("bounds should all name known releases: %v", errs)
+		t.Errorf("bounds naming known releases should pass: %v", errs)
 	}
-	if errs := ValidateAgainstVersions(f, []string{"2.0.0"}); len(errs) == 0 {
-		t.Error("a bound naming no known release should be reported")
+	if errs := ValidateAgainstVersions(f, []string{"9.9"}); len(errs) != 2 {
+		t.Errorf("both bounds name no known release, got %v", errs)
 	}
 }
 

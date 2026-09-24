@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/zamiba/config-forge/configfile"
@@ -22,6 +23,12 @@ type FieldState struct {
 	// ReadOnly is a field the schema shows without a control, on purpose. It is
 	// not editable and has no Reason: nothing is wrong with it.
 	ReadOnly bool
+
+	// Unset is a field the file does not hold, shown with the program's own
+	// default and editable anyway: saving a change adds the key. Value is the
+	// default, so a host renders it like any other value — but it is what the
+	// program would use, not what it has recorded.
+	Unset bool
 
 	// Reason says why it is not editable, as a code rather than a sentence, so
 	// the words shown to a person belong to whoever is drawing the page. Problem
@@ -100,9 +107,17 @@ func resolveField(d configfile.Doc, fl Field) FieldState {
 		st.Problem = fmt.Sprintf("the schema declares an unknown kind, %q", fl.Kind)
 		return st
 	}
-	v, present := d.Get(configfile.ParsePath(fl.Pointer))
+	path := configfile.ParsePath(fl.Pointer)
+	v, present := d.Get(path)
 	st.Value, st.Present = v, present
 	switch {
+	case !present && fl.Default != nil && d.CanCreate(path):
+		// The program has not written this one yet, but the schema knows what the
+		// program would use and the key can be added, so it is editable with that
+		// value showing.
+		st.Value = fl.Default.V
+		st.Unset = true
+		st.Editable = true
 	case !present:
 		st.Reason = ReasonMissing
 		st.Problem = "this setting is not in the file"
@@ -178,20 +193,38 @@ func WriteField(d configfile.Doc, fl Field, v configfile.Value) error {
 	if v.Kind != want {
 		return fmt.Errorf("%s: %w", fl.Pointer, configfile.ErrKindMismatch)
 	}
+	if err := checkFieldValue(fl, v); err != nil {
+		return fmt.Errorf("%s: %w", fl.Pointer, err)
+	}
+	path := configfile.ParsePath(fl.Pointer)
+	err := d.Set(path, v)
+	if errors.Is(err, configfile.ErrNoSuchPath) && fl.Default != nil {
+		// The program has not written this setting yet, and the schema knows what
+		// the program would use, so the key is added. A field with no default is
+		// not created: the schema does not claim to know the program's value for
+		// it, and Resolve does not offer it for editing either. Create still
+		// refuses to add the section or table it would live in.
+		return d.Create(path, v)
+	}
+	return err
+}
+
+// checkFieldValue applies the field's own rules to a value: the options a select
+// offers, the two values a toggle writes, the bounds of a number. Shared by
+// WriteField and by Validate, so a default is held to exactly what a person's
+// edit would be.
+func checkFieldValue(fl Field, v configfile.Value) error {
 	switch fl.Widget {
 	case WidgetSelect, WidgetRadio:
-		allowed := false
 		for _, o := range fl.Options {
 			if o.V() == v {
-				allowed = true
+				return nil
 			}
 		}
-		if !allowed {
-			return fmt.Errorf("%s: %s is not one of the options this field offers", fl.Pointer, v.Display())
-		}
+		return fmt.Errorf("%s is not one of the options this field offers", v.Display())
 	case WidgetToggle, WidgetCheckbox:
 		if fl.On != nil && fl.Off != nil && v != fl.On.V && v != fl.Off.V {
-			return fmt.Errorf("%s: a toggle writes %s or %s, not %s", fl.Pointer, fl.On.V.Display(), fl.Off.V.Display(), v.Display())
+			return fmt.Errorf("a toggle writes %s or %s, not %s", fl.On.V.Display(), fl.Off.V.Display(), v.Display())
 		}
 	case WidgetNumber, WidgetSlider:
 		n := v.Float
@@ -199,11 +232,11 @@ func WriteField(d configfile.Doc, fl Field, v configfile.Value) error {
 			n = float64(v.Int)
 		}
 		if fl.Min != nil && n < *fl.Min {
-			return fmt.Errorf("%s: %s is below the minimum %v", fl.Pointer, v.Display(), *fl.Min)
+			return fmt.Errorf("%s is below the minimum %v", v.Display(), *fl.Min)
 		}
 		if fl.Max != nil && n > *fl.Max {
-			return fmt.Errorf("%s: %s is above the maximum %v", fl.Pointer, v.Display(), *fl.Max)
+			return fmt.Errorf("%s is above the maximum %v", v.Display(), *fl.Max)
 		}
 	}
-	return d.Set(configfile.ParsePath(fl.Pointer), v)
+	return nil
 }

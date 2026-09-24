@@ -28,7 +28,8 @@
               "label": "Fullscreen",
               "value": 3
             }
-          ]
+          ],
+          "default": 0
         },
         {
           "pointer": "video.multiplier",
@@ -38,7 +39,9 @@
           "help": "Integer multiple of the game's native resolution.",
           "min": 1,
           "max": 8,
-          "step": 1
+          "step": 1,
+          "default": 3,
+          "sinceVersion": "1.1 RC4"
         },
         {
           "pointer": "video.vsync",
@@ -46,7 +49,8 @@
           "widget": "toggle",
           "label": "V-sync",
           "on": 1,
-          "off": 0
+          "off": 0,
+          "default": 1
         },
         {
           "pointer": "video.drop_shadows",
@@ -54,7 +58,8 @@
           "widget": "toggle",
           "label": "Drop shadows",
           "on": 1,
-          "off": 0
+          "off": 0,
+          "default": 1
         }
       ]
     },
@@ -68,7 +73,8 @@
           "label": "Master volume",
           "min": 0,
           "max": 10,
-          "step": 1
+          "step": 1,
+          "default": 10
         },
         {
           "pointer": "audio.music",
@@ -77,7 +83,8 @@
           "label": "Music volume",
           "min": 0,
           "max": 10,
-          "step": 1
+          "step": 1,
+          "default": 10
         },
         {
           "pointer": "audio.athletic_bgm",
@@ -85,7 +92,8 @@
           "widget": "toggle",
           "label": "Athletic theme",
           "on": 1,
-          "off": 0
+          "off": 0,
+          "default": 1
         }
       ]
     },
@@ -106,13 +114,15 @@
               "label": "The Lost Levels",
               "value": "SMBLL"
             }
-          ]
+          ],
+          "default": "SMB1"
         },
         {
           "pointer": "game.lang",
           "kind": "string",
           "widget": "text",
-          "label": "Language code"
+          "label": "Language code",
+          "default": "en"
         }
       ]
     },
@@ -126,7 +136,9 @@
           "label": "Stick deadzone",
           "min": 0,
           "max": 1,
-          "step": 0.05
+          "step": 0.05,
+          "default": 0.5,
+          "sinceVersion": "1.1 RC4"
         }
       ]
     },
@@ -137,7 +149,9 @@
           "pointer": "editor.seen_guide",
           "kind": "bool",
           "widget": "toggle",
-          "label": "Guide seen"
+          "label": "Guide seen",
+          "default": false,
+          "sinceVersion": "1.1 RC4"
         },
         {
           "pointer": "editor.autosave_min_timer",
@@ -145,14 +159,17 @@
           "widget": "number",
           "label": "Autosave interval (minutes)",
           "min": 1,
-          "max": 60
+          "max": 60,
+          "default": 5,
+          "sinceVersion": "1.1 RC4"
         },
         {
           "pointer": "editor.autosave_before_test",
           "kind": "bool",
           "widget": "toggle",
           "label": "Autosave before testing",
-          "sinceVersion": "1.0.2"
+          "default": false,
+          "sinceVersion": "1.1 RC4"
         }
       ]
     }
