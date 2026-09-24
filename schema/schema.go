@@ -138,12 +138,46 @@ const (
 	KindFloat  Kind = "float"
 	KindString Kind = "string"
 
+	// KindNumber is a number whose spelling the program does not care about, for
+	// a grammar that does not care either. It is for a writer that drops the
+	// decimal point on a whole number — C#'s System.Text.Json writes a float of
+	// 1.0 as `1`, and C++'s operator<< does the same — where declaring float
+	// would leave the setting unavailable at exactly its own default, and
+	// declaring int would refuse every value between. Only a format whose
+	// numbers are untyped may use it, which Validate checks.
+	KindNumber Kind = "number"
+
 	// KindOpaque is a value no grammar here will rewrite — a list, a coordinate
 	// pair, a nested table. Only a ReadOnly field may declare it.
 	KindOpaque Kind = "opaque"
 )
 
-// Kind returns the configfile kind this names, and whether it is one.
+// accepts reports whether a value of kind c is what this declaration means. It
+// is one-to-one for every kind but number, which takes either spelling.
+func (k Kind) accepts(c configfile.Kind) bool {
+	if k == KindNumber {
+		return c == configfile.KindInt || c == configfile.KindFloat
+	}
+	want, ok := k.configKind()
+	return ok && want == c
+}
+
+// numeric reports whether a field of this kind edits a number.
+func (k Kind) numeric() bool {
+	return k == KindInt || k == KindFloat || k == KindNumber
+}
+
+// editable reports whether an editable field may declare this kind.
+func (k Kind) editable() bool {
+	if k == KindNumber {
+		return true
+	}
+	_, ok := k.configKind()
+	return ok
+}
+
+// Kind returns the configfile kind this names, and whether it is one. A number
+// names no single one, because taking either is the point of it.
 func (k Kind) configKind() (configfile.Kind, bool) {
 	switch k {
 	case KindBool:
@@ -263,12 +297,15 @@ func Validate(f File) []error {
 				errs = append(errs, validateReadOnly(where, fl)...)
 				continue
 			}
-			kind, ok := fl.Kind.configKind()
-			if !ok {
-				bad("%s: %q is not a kind a file can hold editably; they are bool, int, float, string", where, fl.Kind)
+			if !fl.Kind.editable() {
+				bad("%s: %q is not a kind a file can hold editably; they are bool, int, float, number, string", where, fl.Kind)
 				continue
 			}
-			errs = append(errs, validateWidget(where, fl, kind)...)
+			if fl.Kind == KindNumber && !configfile.UntypedNumbers(f.Format) {
+				bad("%s: kind number is for a grammar whose numbers are untyped, and %s's are not; declare int or float", where, f.Format)
+				continue
+			}
+			errs = append(errs, validateWidget(where, fl)...)
 		}
 	}
 	return errs
@@ -281,8 +318,8 @@ func validateReadOnly(where string, fl Field) []error {
 	var errs []error
 	bad := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
 
-	if _, ok := fl.Kind.configKind(); !ok && fl.Kind != KindOpaque {
-		bad("%s: %q is not a kind; they are bool, int, float, string, opaque", where, fl.Kind)
+	if !fl.Kind.editable() && fl.Kind != KindOpaque {
+		bad("%s: %q is not a kind; they are bool, int, float, number, string, opaque", where, fl.Kind)
 	}
 	if fl.Widget != "" {
 		bad("%s: a read-only field has no control, so it must not name a widget", where)
@@ -303,13 +340,13 @@ func validateReadOnly(where string, fl Field) []error {
 	return errs
 }
 
-func validateWidget(where string, fl Field, kind configfile.Kind) []error {
+func validateWidget(where string, fl Field) []error {
 	var errs []error
 	bad := func(format string, a ...any) { errs = append(errs, fmt.Errorf(format, a...)) }
 
 	switch fl.Widget {
 	case WidgetToggle, WidgetCheckbox:
-		if kind == configfile.KindBool {
+		if fl.Kind == KindBool {
 			if fl.On != nil || fl.Off != nil {
 				bad("%s: a bool toggle writes true and false, so it must not name on and off", where)
 			}
@@ -318,7 +355,7 @@ func validateWidget(where string, fl Field, kind configfile.Kind) []error {
 				bad("%s: a %s toggle must name the on and off values it writes", where, fl.Kind)
 				break
 			}
-			if fl.On.V.Kind != kind || fl.Off.V.Kind != kind {
+			if !fl.Kind.accepts(fl.On.V.Kind) || !fl.Kind.accepts(fl.Off.V.Kind) {
 				bad("%s: on and off must be %s values, the kind the file holds", where, fl.Kind)
 			}
 			if fl.On.V == fl.Off.V {
@@ -334,7 +371,7 @@ func validateWidget(where string, fl Field, kind configfile.Kind) []error {
 			if strings.TrimSpace(o.Label) == "" {
 				bad("%s: an option has no label", where)
 			}
-			if o.V().Kind != kind {
+			if !fl.Kind.accepts(o.V().Kind) {
 				bad("%s: option %q is a %v but the file holds %s", where, o.Label, o.V().Kind, fl.Kind)
 			}
 			if values[o.V()] {
@@ -343,7 +380,7 @@ func validateWidget(where string, fl Field, kind configfile.Kind) []error {
 			values[o.V()] = true
 		}
 	case WidgetNumber, WidgetSlider:
-		if kind != configfile.KindInt && kind != configfile.KindFloat {
+		if !fl.Kind.numeric() {
 			bad("%s: a %s edits a number, but the file holds %s", where, fl.Widget, fl.Kind)
 		}
 		if fl.Widget == WidgetSlider && (fl.Min == nil || fl.Max == nil) {
@@ -356,7 +393,7 @@ func validateWidget(where string, fl Field, kind configfile.Kind) []error {
 			bad("%s: step must be above zero", where)
 		}
 	case WidgetText, WidgetPath:
-		if kind != configfile.KindString {
+		if fl.Kind != KindString {
 			bad("%s: a %s edits text, but the file holds %s", where, fl.Widget, fl.Kind)
 		}
 	case "":
@@ -375,7 +412,7 @@ func validateWidget(where string, fl Field, kind configfile.Kind) []error {
 	// would accept. A default the field's own rules reject would be offered and
 	// then refused on save.
 	if fl.Default != nil {
-		if fl.Default.V.Kind != kind {
+		if !fl.Kind.accepts(fl.Default.V.Kind) {
 			bad("%s: the default is a %v but the file holds %s", where, fl.Default.V.Kind, fl.Kind)
 		} else if err := checkFieldValue(fl, fl.Default.V); err != nil {
 			bad("%s: the default is not a value this field accepts: %v", where, err)

@@ -52,7 +52,7 @@ Every uncertainty resolves to *refuse and report*, never to *write and hope*:
 | Value is an array, a dictionary, a `Vector2(…)` | Readable as `KindOpaque` with its literal; `Set` refuses |
 | A string carries an escape this package would not reproduce exactly | Same — readable, not rewritable |
 | `Set` on a path the file does not contain | `ErrNoSuchPath`. `Create` adds a leaf into an existing container; it never adds the container |
-| `Set` with a kind the file does not hold there | `ErrKindMismatch` — a program's `[1024, 960]` never becomes a string |
+| `Set` with a kind the file does not hold there | `ErrKindMismatch` — a program's `[1024, 960]` never becomes a string, and its JSON `1.0` never becomes `1` |
 | Schema names a setting the file has lost, or whose type changed | `Resolve` marks it uneditable and says why |
 
 That last row is the one that matters in practice. A schema written against one
@@ -64,6 +64,8 @@ schema expects int"* instead of corrupting the setting.
 | `Format` | Grammar |
 |---|---|
 | `godot` | Godot `ConfigFile`: `[section]` headers over `key=value` lines of Godot variant literals |
+| `ini` | A plain key/value config: `key = value` lines under optional `[section]` headers, `#` or `;` comments, untyped unquoted values |
+| `json` | Strict JSON with an object at its root: no comments, no trailing commas, no unquoted keys |
 | `luaTable` | A Lua data file — `return { key = value, … }` — in the restricted grammar a deterministic writer emits |
 
 One format per grammar, added when a program needs it, and only where a value's
@@ -79,7 +81,20 @@ parse instead of executing.
 
 A nested table is addressable twice: as an opaque value at its own path, and
 through its children. So `touchControls` reads as a literal and
-`touchControls.enabled` is an editable bool.
+`touchControls.enabled` is an editable bool. A JSON object works the same way.
+
+A JSON **array is opaque and its elements have no paths**. Addressing into one by
+index would let a schema written against one release quietly rewrite the wrong slot
+in the next, so a host shows the value and leaves it to the program. `null` is
+opaque too: the program chose to record the absence of a value, and which kind
+belongs there instead is not this package's guess.
+
+`ini` is the odd one out in that its values are not literals of any language, just
+text. The kind is read from that text, so a string whose text happens to read as a
+number or as `true` is indistinguishable from one and comes back as that kind.
+Rewriting a bool keeps the capitalisation the file already used, because a program
+that writes `True` may only read `True`. An inline `#` on a value line is not
+treated as a comment, since nothing says it is not part of the value.
 
 ## Schemas
 
@@ -109,7 +124,18 @@ what `on` and `off` are for. Conflating the two is how an editor writes `true` i
 a program that counts.
 
 Widgets: `toggle`, `checkbox`, `select`, `radio`, `text`, `number`, `slider`,
-`path`. Kinds: `bool`, `int`, `float`, `string`.
+`path`. Kinds: `bool`, `int`, `float`, `number`, `string`.
+
+`number` is for a program that does not distinguish `1` from `1.0`, written to a
+grammar that does not either. C#'s `System.Text.Json` writes a float of `1.0f` as
+`1`, and C++'s `operator<<` does the same, so such a setting is a whole number at
+its own default and a decimal the moment it moves: `float` would leave it
+unavailable at the default and `int` would refuse every value between. Whether the
+substitution is safe is a fact about the program rather than the grammar —
+libultraship's `Config::GetFloat` ignores a value that is not a JSON float, so
+there the strictness is exactly right — so `Validate` allows `number` only against
+a format whose numbers are untyped, and a Godot or Lua schema still has to say
+which of the two a setting is.
 
 A `pointer` is dotted, which reaches the great majority of settings. Where a key
 itself contains a dot — `modOptions["some.mod"].difficulty` — the dotted form
@@ -161,3 +187,8 @@ know what the program does, so nothing is guessed.
 - **Decide when to write.** A program that is running owns its config and may
   rewrite it at any moment. Refusing to edit a config while its program runs, and
   re-reading afterwards, is the host's responsibility.
+
+## Credits
+
+- Claude by Anthropic for coding assistance
+- The entire Open Source ecosystem and the community behind it

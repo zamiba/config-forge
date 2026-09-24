@@ -31,6 +31,15 @@ const (
 	// whose values are Godot variant literals.
 	FormatGodot Format = "godot"
 
+	// FormatINI is a plain key/value config: `key = value` lines under optional
+	// [section] headers, with # or ; comments and untyped, unquoted values.
+	FormatINI Format = "ini"
+
+	// FormatJSON is strict JSON with an object at its root: no comments, no
+	// trailing commas, no unquoted keys, which is what every writer that emits
+	// JSON produces.
+	FormatJSON Format = "json"
+
 	// FormatLuaTable is a Lua data file — `return { key = value, … }` — in the
 	// restricted grammar a deterministic writer emits: keyed tables, numbers,
 	// booleans and quoted strings. It is not general Lua, and must not be.
@@ -186,6 +195,42 @@ type Doc interface {
 	Bytes() []byte
 }
 
+// NumberSetter is implemented by a Doc whose grammar writes a whole number and a
+// decimal the same way, so one can take the other's place at a path.
+//
+// Whether that substitution is safe is a fact about the program, not about the
+// grammar, which is why it is a second method rather than a loosening of Set.
+// Both of these are JSON: libultraship's Config::GetFloat ignores a value that
+// is not a JSON float, so a setting it keeps must stay spelled as one and Set's
+// refusal is exactly right; C#'s System.Text.Json writes a float of 1.0 as `1`
+// and reads either, so the same refusal would make that setting uneditable at
+// its own default. The schema is where a program's own habits are recorded, so
+// the schema is what chooses between Set and SetNumber.
+//
+// A grammar whose types are its own — Godot's variants, Lua's integers and
+// floats — does not implement this: there, a number's spelling is the value's
+// type and changing it is changing the value.
+type NumberSetter interface {
+	Doc
+
+	// SetNumber rewrites a number at a path, in the spelling the value carries
+	// rather than the one the file holds. It returns ErrKindMismatch when either
+	// the value or what the file holds is not a number.
+	SetNumber(Path, Value) error
+}
+
+// UntypedNumbers reports whether a format's numbers carry no int/float
+// distinction of their own, and so whether a Doc of that format is a
+// NumberSetter. It lets a schema be checked for declaring an untyped number
+// against a grammar that has no such thing, before any file is opened.
+func UntypedNumbers(f Format) bool {
+	switch f {
+	case FormatJSON, FormatINI:
+		return true
+	}
+	return false
+}
+
 // Open reads and parses a config file. The format is declared by the caller.
 func Open(path string, format Format) (Doc, error) {
 	data, err := os.ReadFile(path)
@@ -204,6 +249,10 @@ func Parse(data []byte, format Format) (Doc, error) {
 	switch format {
 	case FormatGodot:
 		return parseGodot(data)
+	case FormatINI:
+		return parseINI(data)
+	case FormatJSON:
+		return parseJSON(data)
 	case FormatLuaTable:
 		return parseLuaTable(data)
 	}
@@ -211,7 +260,7 @@ func Parse(data []byte, format Format) (Doc, error) {
 }
 
 // Formats lists the formats this build implements.
-func Formats() []Format { return []Format{FormatGodot, FormatLuaTable} }
+func Formats() []Format { return []Format{FormatGodot, FormatINI, FormatJSON, FormatLuaTable} }
 
 // Empty is a document that contains nothing: every Get reports absent and every
 // Set is refused.
@@ -240,3 +289,7 @@ func (emptyDoc) Create(p Path, _ Value) error {
 }
 
 func (emptyDoc) CanCreate(Path) bool { return false }
+
+// numeric reports whether a kind is a number, which is what SetNumber accepts on
+// both sides of the substitution it makes.
+func numeric(k Kind) bool { return k == KindInt || k == KindFloat }

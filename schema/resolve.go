@@ -101,8 +101,7 @@ func resolveField(d configfile.Doc, fl Field) FieldState {
 		}
 		return st
 	}
-	want, ok := fl.Kind.configKind()
-	if !ok {
+	if !fl.Kind.editable() {
 		st.Reason = ReasonUnknownKind
 		st.Problem = fmt.Sprintf("the schema declares an unknown kind, %q", fl.Kind)
 		return st
@@ -121,7 +120,7 @@ func resolveField(d configfile.Doc, fl Field) FieldState {
 	case !present:
 		st.Reason = ReasonMissing
 		st.Problem = "this setting is not in the file"
-	case v.Kind != want:
+	case !fl.Kind.accepts(v.Kind):
 		st.Reason = ReasonKindChanged
 		st.Problem = fmt.Sprintf("the file holds %v here, but the schema expects %s", v.Kind, fl.Kind)
 	default:
@@ -186,18 +185,29 @@ func WriteField(d configfile.Doc, fl Field, v configfile.Value) error {
 	if fl.ReadOnly {
 		return fmt.Errorf("%s: this setting is shown, not edited", fl.Pointer)
 	}
-	want, ok := fl.Kind.configKind()
-	if !ok {
+	if !fl.Kind.editable() {
 		return fmt.Errorf("%s: the schema declares an unknown kind, %q", fl.Pointer, fl.Kind)
 	}
-	if v.Kind != want {
+	if !fl.Kind.accepts(v.Kind) {
 		return fmt.Errorf("%s: %w", fl.Pointer, configfile.ErrKindMismatch)
 	}
 	if err := checkFieldValue(fl, v); err != nil {
 		return fmt.Errorf("%s: %w", fl.Pointer, err)
 	}
 	path := configfile.ParsePath(fl.Pointer)
-	err := d.Set(path, v)
+	set := d.Set
+	if fl.Kind == KindNumber {
+		// The program does not distinguish 1 from 1.0, so the value is written in
+		// the spelling the edit carries rather than the one the file happens to
+		// hold. Only a grammar whose numbers are untyped offers this, and Validate
+		// has already refused the declaration against any other.
+		n, ok := d.(configfile.NumberSetter)
+		if !ok {
+			return fmt.Errorf("%s: this file's grammar gives its numbers a type, so kind number cannot be written to it", fl.Pointer)
+		}
+		set = n.SetNumber
+	}
+	err := set(path, v)
 	if errors.Is(err, configfile.ErrNoSuchPath) && fl.Default != nil {
 		// The program has not written this setting yet, and the schema knows what
 		// the program would use, so the key is added. A field with no default is

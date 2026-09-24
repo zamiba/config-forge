@@ -275,7 +275,7 @@ func TestGodotPathsAreInDeclarationOrder(t *testing.T) {
 }
 
 func TestParseRejectsAnUnknownFormat(t *testing.T) {
-	if _, err := Parse([]byte("x=1"), Format("ini")); err == nil {
+	if _, err := Parse([]byte("x = 1"), Format("toml")); err == nil {
 		t.Error("an unimplemented format should be refused")
 	}
 }

@@ -1,5 +1,70 @@
 # Changelog
 
+## v0.0.3 - 2026-09-24
+
+### Added
+
+- **`json`: strict JSON with an object at its root.** It is what the great
+  majority of these programs write, by a distance — twelve of the twenty-two
+  config files across the catalog, from four separate writers: nlohmann::json in
+  every libultraship port, librecomp's own `Config` in Banjo Recompiled, a hand-
+  built `nlohmann::json` in Snap64 Recomp, and C#'s `System.Text.Json` in Crash
+  Bandicoot Recompiled.
+
+  No comments, no trailing commas, no unquoted keys: a file carrying any of those
+  was not written by the program whose settings are being edited. An object is
+  addressable twice over, as an opaque value at its own path and through its
+  children, the way a Lua table is. An **array is opaque and its elements have no
+  paths of their own** — addressing into one by index would let a schema written
+  against one release quietly rewrite the wrong slot in the next — and `null` is
+  opaque for the same reason: the program recorded the absence of a value, and
+  which kind belongs there instead is not this package's guess to make.
+
+  A created member brings the comma the object now needs and takes its siblings'
+  own indentation, whether that is tabs, two spaces or four; an object written on
+  one line is added to on that line rather than reformatted.
+
+  **A float keeps its decimal point.** JSON has one number type but the program
+  reading the file does not: libultraship's `Config::GetFloat` ignores a value
+  that is not a JSON float, so a setting that came back as `2` would silently stop
+  being read at all.
+
+- **`ini`: a plain key/value config.** `key = value` lines under optional
+  `[section]` headers, with `#` or `;` comments. Crash Bandicoot Recompiled's
+  `interface.ini` and Open Nectar's `pikmin_settings.conf` are both this.
+
+  Unlike Godot's `ConfigFile`, which it resembles, the values are not literals of
+  any language: they are text, and what one means is decided by whatever parses it
+  on the other side. So the kind is read from the text — `true` or `false` in any
+  capitalisation is a bool, a whole number an int, a decimal a float, everything
+  else an unquoted string. **Rewriting a bool keeps the capitalisation the file
+  already used**, because a program that writes `True` may well be one that only
+  reads `True`. A value that could not survive the round trip — one carrying a
+  newline, one that would be trimmed back, one starting `#`, `;` or `[` — is
+  refused rather than written.
+
+  A file may hold things that are not this grammar at all: `interface.ini` ends
+  with an ImGui layout blob, appended verbatim after a blank line. An unrecognised
+  line is left exactly where it is.
+
+- **`kind: "number"`, and `configfile.NumberSetter`.** A number whose spelling the
+  program does not care about, for a grammar that does not care either.
+
+  This is the one thing the catalog sweep turned up that no existing kind could
+  express. C#'s `System.Text.Json` writes a float of `1.0f` as `1`, and C++'s
+  `operator<<` does the same, so a setting like Crash's `MasterVolume` or Open
+  Nectar's `renderScale` sits in the file as a whole number at exactly its own
+  default and as a decimal the moment anyone moves it. Declaring `float` left it
+  unavailable at its default; declaring `int` refused every value between.
+
+  Whether the substitution is safe is a fact about the **program**, not about the
+  grammar — both of the cases above are JSON, and so is libultraship, where the
+  refusal is exactly right — which is why it is a second method, `SetNumber`,
+  rather than a loosening of `Set`, and why the schema is what chooses between
+  them. Only a format whose numbers are untyped implements it, and `Validate`
+  refuses `kind: "number"` declared against any other, so a Godot or Lua schema
+  still has to say which of the two a setting is.
+
 ## v0.0.2 - 2026-09-24
 
 ### Added

@@ -211,3 +211,158 @@ func TestLuaCreateAfterEditsLandsInsideTheTable(t *testing.T) {
 		t.Errorf("nested result no longer parses: %v", err)
 	}
 }
+
+func TestJSONCreateAddsAMemberToItsObject(t *testing.T) {
+	d := js(t, shipCfg)
+	if !d.CanCreate(ParsePath("Window.Vsync")) {
+		t.Fatal("Window exists, so a member can be added to it")
+	}
+	if err := d.Create(ParsePath("Window.Vsync"), Bool(true)); err != nil {
+		t.Fatal(err)
+	}
+	// The comma goes on the member that was last, because JSON forbids a trailing
+	// one, and the new line takes its siblings' indentation.
+	if !strings.Contains(string(d.Bytes()), "        \"Width\": 1280,\n        \"Vsync\": true\n    }") {
+		t.Errorf("layout:\n%s", d.Bytes())
+	}
+	// Deeper in, where the indentation is different again.
+	if err := d.Create(ParsePath("CVars.gEnhancements.Mods.Portable"), Int(1)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(d.Bytes()), "                \"AlternateAssets\": 0,\n                \"Portable\": 1\n            }") {
+		t.Errorf("nested layout:\n%s", d.Bytes())
+	}
+	for path, want := range map[string]string{
+		"Window.Vsync": "true", "CVars.gEnhancements.Mods.Portable": "1",
+		"Window.Width": "1280", "Window.Backend.Name": "OpenGL",
+		"CVars.gEnhancements.TimeSavers.SkipIntro": "1",
+	} {
+		if v, ok := d.Get(ParsePath(path)); !ok || v.Display() != want {
+			t.Errorf("%s = %q, want %q", path, v.Display(), want)
+		}
+	}
+	out := d.Bytes()
+	if _, err := Parse(out, FormatJSON); err != nil {
+		t.Fatalf("the result no longer parses: %v", err)
+	}
+	// And a created member is editable like any other.
+	if err := d.Set(ParsePath("Window.Vsync"), Bool(false)); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := d.Get(ParsePath("Window.Vsync")); v.Bool {
+		t.Error("the created member should now be false")
+	}
+}
+
+func TestJSONCreateRefusesAMissingOrNonObjectParent(t *testing.T) {
+	d := js(t, shipCfg)
+	before := string(d.Bytes())
+	for name, p := range map[string]Path{
+		"missing parent":     {"Audio", "Master"},
+		"parent is an int":   {"Window", "Width", "x"},
+		"parent is a bool":   {"Window", "Fullscreen", "Enabled", "x"},
+		"parent is an array": {"CVars", "gWindowed", "Position", "x"},
+	} {
+		if d.CanCreate(p) {
+			t.Errorf("%s: CanCreate should be false", name)
+		}
+		if err := d.Create(p, Int(1)); !errors.Is(err, ErrNoContainer) {
+			t.Errorf("%s: err = %v, want ErrNoContainer", name, err)
+		}
+	}
+	if err := d.Create(ParsePath("Window.Width"), Int(1)); !errors.Is(err, ErrAlreadyPresent) {
+		t.Errorf("err = %v, want ErrAlreadyPresent", err)
+	}
+	if got := string(d.Bytes()); got != before {
+		t.Error("a refused Create modified the file")
+	}
+}
+
+// An object written on one line is added to on that line, rather than being
+// reformatted into the layout this package would have chosen.
+func TestJSONCreateIntoAnInlineObject(t *testing.T) {
+	d := js(t, `{"empty": {}, "spaced": { }, "filled": {"a": 1}}`)
+	if err := d.Create(Path{"empty", "x"}, Int(1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Create(Path{"spaced", "y"}, Int(2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Create(Path{"filled", "b"}, Int(3)); err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"empty": { "x": 1 }, "spaced": { "y": 2 }, "filled": {"a": 1, "b": 3}}`
+	if got := string(d.Bytes()); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	if v, _ := d.Get(Path{"filled", "a"}); v.Int != 1 {
+		t.Error("the existing member was disturbed")
+	}
+	if _, err := Parse(d.Bytes(), FormatJSON); err != nil {
+		t.Errorf("the result no longer parses: %v", err)
+	}
+}
+
+// An object with nothing in it yet has no sibling to line up with, so the
+// indentation comes from the file's own.
+func TestJSONCreateIntoAnEmptyMultilineObject(t *testing.T) {
+	for name, tc := range map[string]struct{ in, want string }{
+		"four spaces": {
+			"{\n    \"Mods\": {\n    }\n}\n",
+			"{\n    \"Mods\": {\n        \"a\": 1\n    }\n}\n",
+		},
+		"tabs": {
+			"{\n\t\"Mods\": {\n\t}\n}\n",
+			"{\n\t\"Mods\": {\n\t\t\"a\": 1\n\t}\n}\n",
+		},
+	} {
+		d := js(t, tc.in)
+		if err := d.Create(Path{"Mods", "a"}, Int(1)); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got := string(d.Bytes()); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", name, got, tc.want)
+		}
+	}
+}
+
+// Create after Set: the enclosing spans have to have moved with the edits, or the
+// new member is measured from a stale closing brace and lands outside the object.
+func TestJSONCreateAfterEditsLandsInsideTheObject(t *testing.T) {
+	d := js(t, shipCfg)
+	// A shortening edit and a lengthening one, so the net delta is not zero.
+	if err := d.Set(ParsePath("Window.Backend.Name"), String("DirectX 11")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Set(ParsePath("Window.PositionX"), Int(0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Create(ParsePath("Window.Vsync"), Bool(true)); err != nil {
+		t.Fatal(err)
+	}
+	out := string(d.Bytes())
+	if !strings.Contains(out, "\"Vsync\": true\n    }\n}") {
+		t.Errorf("the member did not land inside Window:\n%s", out)
+	}
+	if _, err := Parse([]byte(out), FormatJSON); err != nil {
+		t.Fatalf("the result no longer parses: %v", err)
+	}
+
+	// The same one level deeper, after an edit inside that very object.
+	if err := d.Set(ParsePath("CVars.gGraphics.MSAAValue"), Int(4)); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Create(ParsePath("CVars.gGraphics.Vsync"), Int(1)); err != nil {
+		t.Fatal(err)
+	}
+	back := js(t, string(d.Bytes()))
+	for path, want := range map[string]string{
+		"Window.Vsync": "true", "Window.Backend.Name": "DirectX 11",
+		"Window.PositionX": "0", "CVars.gGraphics.MSAAValue": "4",
+		"CVars.gGraphics.Vsync": "1", "CVars.gGraphics.InternalResolution": "1",
+	} {
+		if v, ok := back.Get(ParsePath(path)); !ok || v.Display() != want {
+			t.Errorf("after re-reading: %s = %q, want %q", path, v.Display(), want)
+		}
+	}
+}
