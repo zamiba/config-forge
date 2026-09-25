@@ -231,6 +231,27 @@ func (d *iniDoc) CanCreate(p Path) bool {
 	return ok
 }
 
+// CreateContainer adds a section header, which a key can then be added under. A
+// section is the only container this grammar has, so the path is one element.
+func (d *iniDoc) CreateContainer(p Path) error {
+	if len(p) != 1 || p[0] == "" {
+		return fmt.Errorf("%w: a section is the only container this grammar has: %s", ErrNoContainer, p)
+	}
+	if _, have := d.sectionEnd[p[0]]; have {
+		return fmt.Errorf("%w: %s", ErrAlreadyPresent, p)
+	}
+	text := "\n[" + p[0] + "]\n"
+	if len(d.buf) == 0 {
+		text = "[" + p[0] + "]\n"
+	} else if d.buf[len(d.buf)-1] != '\n' {
+		text = "\n" + text
+	}
+	at := len(d.buf)
+	d.buf = append(d.buf, text...)
+	d.sectionEnd[p[0]] = at + len(text) - 1
+	return nil
+}
+
 func (d *iniDoc) Create(p Path, v Value) error {
 	if len(p) == 0 || p[len(p)-1] == "" {
 		return fmt.Errorf("%w: %s", ErrNoSuchPath, p)

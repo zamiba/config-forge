@@ -246,6 +246,30 @@ func (d *godotDoc) CanCreate(p Path) bool {
 	return exists
 }
 
+// CreateContainer adds a section header, which a key can then be added under. A
+// section is the only container this grammar has, so the path is one element.
+func (d *godotDoc) CreateContainer(p Path) error {
+	if len(p) != 1 || p[0] == "" {
+		return fmt.Errorf("%w: a section is the only container a ConfigFile has: %s", ErrNoContainer, p)
+	}
+	if _, have := d.sectionEnd[p[0]]; have {
+		return fmt.Errorf("%w: %s", ErrAlreadyPresent, p)
+	}
+	// At the end of the file, after a blank line, the way Godot separates them.
+	text := "\n[" + p[0] + "]\n"
+	if len(d.buf) == 0 {
+		text = "[" + p[0] + "]\n"
+	} else if d.buf[len(d.buf)-1] != '\n' {
+		text = "\n" + text
+	}
+	at := len(d.buf)
+	d.buf = append(d.buf, text...)
+	// The header's own line ends just before the trailing newline, which is where
+	// this section's first key goes.
+	d.sectionEnd[p[0]] = at + len(text) - 1
+	return nil
+}
+
 func (d *godotDoc) Create(p Path, v Value) error {
 	section, key, ok := godotSectionKey(p)
 	if !ok || key == "" {

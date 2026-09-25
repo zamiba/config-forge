@@ -1,5 +1,163 @@
 # Changelog
 
+## v0.0.4 - 2026-09-25
+
+### Added
+
+- **`toml`, in the subset a settings file uses.** `key = value` lines under
+  optional `[table]` headers, with `#` comments, dotted and quoted keys, and all
+  four of TOML's string forms.
+
+  It is not a general TOML parser and does not try to be. What it guarantees is
+  what every grammar here guarantees — that it knows exactly where a value begins
+  and ends — and for TOML that means measuring the constructs it does *not*
+  interpret as carefully as the ones it does. An array, an inline table, a
+  multi-line string and a date are each located, spanned across however many
+  lines they occupy, reported as `KindOpaque` and refused by `Set`. Getting their
+  extent wrong would be worse than not reading them at all: a line-oriented
+  parser that mistook the middle of a multi-line array for a key would write a
+  setting into the middle of somebody's list.
+
+  **An array of tables, `[[thing]]`, is refused, and the whole file with it.**
+  Every other construct has one place a given path can be; a repeated table does
+  not, and a schema pointing into one would be addressing whichever copy came
+  first.
+
+  A multi-line string is readable and not rewritable, for the same reason a
+  string carrying an unreproducible escape is: writing it back would mean
+  rendering it as one escaped line, which is the same value in a layout the
+  program did not choose.
+
+- **`spaceSeparated`: a key and a value with whitespace between them.** No
+  sections, no equals sign — what a C program writes with `fprintf` and reads
+  back with a tokeniser.
+
+  **The value is the rest of the line**, which is deliberate rather than lazy.
+  Files in this shape hold entries whose value is several tokens — a controller
+  binding is three hex numbers on one line — and a parser that took only the
+  first would report a binding as the number 38 and let something overwrite the
+  rest. So a value of more than one token is located whole and reported as
+  opaque. A quoted run is one value however many spaces are inside it, because
+  that is what `std::quoted` reads.
+
+  Neither writer of this format emits a comment, and neither reads one except on
+  a line of its own, so a trailing `#` is not treated as one here either: a line
+  carrying one simply has a value of several tokens, and is therefore opaque,
+  which is the safe reading.
+
+  The two programs that write it do not agree on how to spell things, and that is
+  the schema's business rather than the parser's: one writes a bool as `true` and
+  a float with six decimal places, the other writes a bool as `1` and a float
+  through `operator<<`, which drops the point on a whole number — so its floats
+  declare `kind: "number"`.
+
+- **Completing a config from a reference copy of it: `schema.Complete`,
+  `schema.ResolveWith` and `Doc.CreateContainer`.**
+
+  A config holds only what its program has written, and `Create` can add a leaf
+  into a container that is already there but not the container itself — so a
+  setting whose *section* the program has never written could not be edited at all,
+  and there was nothing to be done about it from inside this package. A reference
+  copy changes what is known: a complete copy of the config, authored from the
+  program's own source, with every setting at the value the program itself uses.
+  Given one, the section being added is **copied rather than invented**, which is
+  the whole of the justification.
+
+  `CreateContainer` is the one thing here that adds structure, and each grammar
+  renders its own kind of empty container — a `[section]`, a `[table]`, `{}`.
+  `Complete` drives it, bounded by the **schema** rather than by the reference: a
+  setting the reference holds that no field names is not written, and neither is one
+  whose version bounds put it outside the installed release, so a reference taken
+  from a newer build cannot drag that build's settings into an older one. Where the
+  two disagree about a setting's kind, neither is written — one of them is wrong and
+  writing either would be writing a guess. `ResolveWith` is `Resolve` with the
+  reference in hand, so a setting the reference makes addable comes back editable and
+  `Unset` instead of unavailable.
+
+  A container is attested by asking the reference two ways, because the grammars
+  disagree about what a container is: a JSON object and a Lua table are values in
+  their own right, while a Godot, ini or TOML section is not a value at all and shows
+  up only as the prefix of the paths inside it.
+
+- **`File.Reference`: a schema names the reference copies it ships.** One object, or
+  an array of them, each with a `file` and optional `sinceVersion`/`untilVersion` —
+  the same two spellings a spec's `userDataPaths` accepts.
+
+  The alternative was a naming convention, deriving the copy's name from the config
+  file's. Declaring it makes the relationship a statement rather than a coincidence:
+  a schema can say it deliberately has *no* reference, one copy can cover a range of
+  releases instead of needing one file per release, and a program whose config changes
+  shape between releases says so where somebody reading the catalog will see it.
+  `ReferenceFor` picks the copy that applies to a release, in declaration order, so an
+  unbounded one placed last reads as the fallback it is.
+
+  `Validate` refuses a reference with no file, one that is a path rather than a bare
+  name beside the schema, one named `.json` — `LoadDir` reads every `.json` in the
+  folder as a schema, so such a copy would be parsed as one and fail — and the same
+  file named twice. `ValidateAgainstVersions` holds a reference's bounds to the same
+  rule a field's: a bound naming no declared release would silently apply to nothing.
+
+  **Folding the copy into the schema as structure was considered and rejected.** A
+  reference's authority comes from being a copy of a real file, which is what makes
+  adding a section copying rather than inventing — and what lets somebody `diff` it
+  against a config captured from an actual run. A tree inside a schema cannot be
+  diffed against a real file, and turning one into a file would need a serialiser per
+  grammar, which is the thing this package has not had since v0.0.1 and should not
+  gain.
+
+- **`Value.Equal`**, which compares two values by what they are rather than by how
+  they were spelled.
+
+### Fixed
+
+- **A select no longer fails to recognise the option its file is already set to.**
+  `checkFieldValue` compared `configfile.Value` structs directly, and a value parsed
+  out of a file carries its literal in `Raw` while one declared in a schema does not
+  — so a `mode=2` in the file matched no option, and a toggle set to its own `on`
+  value matched neither `on` nor `off`. Both now compare with `Value.Equal`. It went
+  unnoticed because every value that previously reached these checks came from a
+  schema or from a host decoding JSON, neither of which sets `Raw`; resolving against
+  a reference copy is the first thing to compare a file's own value against a
+  schema's.
+
+### Changed
+
+- **A schema is named `<something>.schema.json`, and `LoadDir` reads only those.**
+  `schema.SchemaSuffix` is the constant.
+
+  Reading every `.json` was a convention; reading only these is a contract. Everything
+  else in the folder — a reference copy, a capture from a real run, anything somebody
+  keeps beside them — is ignored rather than parsed as a schema and failing. It also
+  settles an ambiguity that had already arrived: Ship of Harkinian's folder held
+  `shipofharkinian.json` (the schema) next to `shipofharkinian.json.example` (a copy of
+  the game's config, which is *also* called `shipofharkinian.json`), and the second read
+  as an example of the first. `shipofharkinian.schema.json` says which is which.
+
+  A consequence worth having: a reference copy may now be named plainly, `settings.json`
+  included, because the suffix is what marks a schema. `Validate` refuses only a
+  reference named `.schema.json`.
+
+  **Breaking:** a schema not named this way is no longer found. It is not an error —
+  a folder with no schemas is how a program with no editable config looks — so a host
+  that keeps schemas of its own should check that a folder it expects to yield some
+  does.
+
+- **`Doc` gained `CreateContainer`.** Every implementation in this module has it; one
+  outside it does not compile until it does.
+
+- **`Resolve`'s contract is spelled out: reported is not the same as worth
+  drawing.** A field that is not `Editable` is one nobody can act on, and a row
+  saying so states a fact about the schema rather than offering a choice, so a host
+  is expected to leave it out of what it draws. It is still reported, because that
+  is the only signal a schema has drifted away from its program and the host is the
+  only thing that can log it. Nothing changed in the code; the doc comment
+  previously argued the opposite, and it was wrong.
+
+- **`UntypedNumbers` now includes `spaceSeparated`**, so its numeric settings can
+  declare `kind: "number"` and be written in whichever spelling the value carries.
+  `godot`, `luaTable` and `toml` still give their numbers a type of their own, and
+  `Validate` still refuses the declaration against all three.
+
 ## v0.0.3 - 2026-09-24
 
 ### Added

@@ -337,6 +337,17 @@ func (d *luaDoc) CanCreate(p Path) bool {
 }
 
 func (d *luaDoc) Create(p Path, v Value) error {
+	lit, err := luaLiteral(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", p, err)
+	}
+	return d.createLiteral(p, lit)
+}
+
+// CreateContainer adds an empty table, which a key can then be added inside.
+func (d *luaDoc) CreateContainer(p Path) error { return d.createLiteral(p, "{}") }
+
+func (d *luaDoc) createLiteral(p Path, lit string) error {
 	if len(p) == 0 || p[len(p)-1] == "" {
 		return fmt.Errorf("%w: %s", ErrNoSuchPath, p)
 	}
@@ -346,10 +357,6 @@ func (d *luaDoc) Create(p Path, v Value) error {
 	start, end, ok := d.container(p)
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNoContainer, Path(p[:len(p)-1]))
-	}
-	lit, err := luaLiteral(v)
-	if err != nil {
-		return fmt.Errorf("%s: %w", p, err)
 	}
 	assign := luaKey(p[len(p)-1]) + " = " + lit
 

@@ -17,10 +17,15 @@ func TestLoadDir(t *testing.T) {
 		}
 	}
 	field := `"sections":[{"title":"S","fields":[{"pointer":"a.b","kind":"int","widget":"number","label":"L"}]}]`
-	write("sound.json", `{"title":"Sound","order":3,"path":"install/sound.json","format":"godot",`+field+`}`)
-	write("graphics.json", `{"title":"Graphics","order":1,"path":"install/graphics.json","format":"godot",`+field+`}`)
-	write("controls.json", `{"title":"Controls","order":1,"path":"install/controls.json","format":"godot",`+field+`}`)
+	write("sound.schema.json", `{"title":"Sound","order":3,"path":"install/sound.json","format":"godot",`+field+`}`)
+	write("graphics.schema.json", `{"title":"Graphics","order":1,"path":"install/graphics.json","format":"godot",`+field+`}`)
+	write("controls.schema.json", `{"title":"Controls","order":1,"path":"install/controls.json","format":"godot",`+field+`}`)
 	write("notes.txt", "ignored")
+	// Everything that is not a schema is ignored rather than parsed as one: a
+	// reference copy of a config that is itself JSON, and a capture from a real run,
+	// both sit beside the schemas and neither is one.
+	write("sound.json.example", `{"anything": true}`)
+	write("captured.json", `not json at all, and not read`)
 	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +47,7 @@ func TestLoadDir(t *testing.T) {
 		t.Errorf("a missing directory should be no schemas and no error, got %v, %v", files, err)
 	}
 
-	write("broken.json", `{"title":`)
+	write("broken.schema.json", `{"title":`)
 	if _, err := LoadDir(dir); err == nil {
 		t.Error("a malformed schema should be an error, not silence")
 	}

@@ -61,16 +61,39 @@ type SectionState struct {
 	Fields []FieldState
 }
 
-// Resolve reads a schema against an open file and reports what a host should
-// draw. Fields outside the release's version range are left out entirely; fields
-// the file cannot support are included and marked, because "this setting exists
-// but cannot be edited here" is worth showing and silence is not.
+// Resolve reads a schema against an open file and reports every field it names.
+// Fields outside the release's version range are left out entirely; fields the
+// file cannot support are included and marked with the reason they cannot be
+// edited.
+//
+// **Reported is not the same as worth drawing.** A field that is not Editable is
+// one nobody can act on — a setting this release stores differently, or one whose
+// section the program has not written — and a row saying so is noise on a settings
+// page: it states a fact about the schema, not a choice the person has. A host is
+// expected to leave such a field out of what it draws. They are reported anyway
+// because that is the only signal a schema has drifted away from its program, and
+// the host is the only thing in a position to log it. Deciding to show a setting
+// and deciding to report one are different jobs, and this is the reporting one.
 //
 // versions is the program's releases, oldest first, as the install spec declares
 // them; it is what SinceVersion and UntilVersion are compared against. A bound
 // naming a release not in the list is ignored rather than guessed at — a
 // misspelled bound is a schema fault, which ValidateAgainstVersions reports.
 func Resolve(d configfile.Doc, f File, version string, versions []string) []SectionState {
+	return ResolveWith(d, nil, f, version, versions)
+}
+
+// ResolveWith is Resolve against a file the catalog can complete from.
+//
+// ref is a reference copy of the config — the same file with every setting at the
+// value the program itself uses — and it changes one answer: a setting whose
+// section the file does not have is editable after all, because Complete can add
+// the section by copying it rather than inventing it. Such a field comes back Unset,
+// like any other value the file has not recorded, showing what ref holds for it.
+//
+// A nil ref is the plain Resolve: without one, a setting whose section is missing
+// stays uneditable, since nothing attests that the section is real.
+func ResolveWith(d, ref configfile.Doc, f File, version string, versions []string) []SectionState {
 	var out []SectionState
 	for _, sec := range f.Sections {
 		state := SectionState{Title: sec.Title, Help: sec.Help}
@@ -78,7 +101,7 @@ func Resolve(d configfile.Doc, f File, version string, versions []string) []Sect
 			if !fl.appliesTo(version, versions) {
 				continue
 			}
-			state.Fields = append(state.Fields, resolveField(d, fl))
+			state.Fields = append(state.Fields, resolveField(d, ref, fl))
 		}
 		if len(state.Fields) > 0 {
 			out = append(out, state)
@@ -87,7 +110,7 @@ func Resolve(d configfile.Doc, f File, version string, versions []string) []Sect
 	return out
 }
 
-func resolveField(d configfile.Doc, fl Field) FieldState {
+func resolveField(d, ref configfile.Doc, fl Field) FieldState {
 	st := FieldState{Field: fl}
 	if fl.ReadOnly {
 		// Shown, never written, whatever the file holds — including a kind no
@@ -117,6 +140,17 @@ func resolveField(d configfile.Doc, fl Field) FieldState {
 		st.Value = fl.Default.V
 		st.Unset = true
 		st.Editable = true
+	case !present && ref != nil && completable(d, ref, fl, path):
+		// Its section is not in the file either, which on its own would be the end
+		// of it — but the reference copy has that section, so Complete can add it by
+		// copying rather than by guessing at the program's structure.
+		if v, ok := ref.Get(path); ok && fl.Kind.accepts(v.Kind) {
+			st.Value = v
+		} else {
+			st.Value = fl.Default.V
+		}
+		st.Unset = true
+		st.Editable = true
 	case !present:
 		st.Reason = ReasonMissing
 		st.Problem = "this setting is not in the file"
@@ -127,6 +161,33 @@ func resolveField(d configfile.Doc, fl Field) FieldState {
 		st.Editable = true
 	}
 	return st
+}
+
+// completable reports whether Complete would be able to add this field: there has
+// to be a value to write, every missing container has to be attested by ref, and
+// the value has to be one the field accepts. It mirrors Complete deliberately — a
+// page that offered a setting the save then refused would be worse than not
+// offering it.
+func completable(d, ref configfile.Doc, fl Field, path configfile.Path) bool {
+	v, fromRef := ref.Get(path)
+	if !fromRef || v.Kind == configfile.KindOpaque {
+		if fl.Default == nil {
+			return false
+		}
+		v = fl.Default.V
+	}
+	if !fl.Kind.accepts(v.Kind) || checkFieldValue(fl, v) != nil {
+		return false
+	}
+	for i := 1; i < len(path); i++ {
+		if hasContainer(d, path[:i]) {
+			continue
+		}
+		if !hasContainer(ref, path[:i]) {
+			return false
+		}
+	}
+	return true
 }
 
 // appliesTo reports whether the field belongs to this release.
@@ -165,6 +226,13 @@ func indexOf(list []string, s string) int {
 // or not by itself, while this depends on the spec it is paired with.
 func ValidateAgainstVersions(f File, versions []string) []error {
 	var errs []error
+	for _, r := range f.Reference {
+		for label, bound := range map[string]string{"sinceVersion": r.SinceVersion, "untilVersion": r.UntilVersion} {
+			if bound != "" && indexOf(versions, bound) < 0 {
+				errs = append(errs, fmt.Errorf("reference %s: %s names %q, which is not a declared release", r.File, label, bound))
+			}
+		}
+	}
 	for _, sec := range f.Sections {
 		for _, fl := range sec.Fields {
 			for label, bound := range map[string]string{"sinceVersion": fl.SinceVersion, "untilVersion": fl.UntilVersion} {
@@ -227,13 +295,13 @@ func checkFieldValue(fl Field, v configfile.Value) error {
 	switch fl.Widget {
 	case WidgetSelect, WidgetRadio:
 		for _, o := range fl.Options {
-			if o.V() == v {
+			if o.V().Equal(v) {
 				return nil
 			}
 		}
 		return fmt.Errorf("%s is not one of the options this field offers", v.Display())
 	case WidgetToggle, WidgetCheckbox:
-		if fl.On != nil && fl.Off != nil && v != fl.On.V && v != fl.Off.V {
+		if fl.On != nil && fl.Off != nil && !v.Equal(fl.On.V) && !v.Equal(fl.Off.V) {
 			return fmt.Errorf("a toggle writes %s or %s, not %s", fl.On.V.Display(), fl.Off.V.Display(), v.Display())
 		}
 	case WidgetNumber, WidgetSlider:
@@ -249,4 +317,114 @@ func checkFieldValue(fl Field, v configfile.Value) error {
 		}
 	}
 	return nil
+}
+
+// Complete fills in every setting this schema names, for this release, that the
+// file does not hold — taking each value from ref, a reference copy of the same
+// config, and falling back to the field's own default where ref does not carry it.
+// It reports how many settings it added.
+//
+// This is the second half of a bargain the catalog makes. Create alone adds a leaf
+// into a container that is already there, which is as far as anything can go on
+// its own: a program reads its config into a fixed set of sections, and one it does
+// not recognise can break that read. A reference file changes what is known — it
+// is a complete copy of the config, authored from the program's own source — so the
+// sections being added are not guesses, and adding them is copying rather than
+// inventing. Everything already in the file is left exactly as it is.
+//
+// What gets written is bounded by the *schema*, not by ref: a setting ref holds
+// that no field names is not written, and neither is one whose version bounds put
+// it outside this release. So a reference file taken from a newer build does not
+// drag that build's settings into an older one.
+func Complete(d, ref configfile.Doc, f File, version string, versions []string) (int, error) {
+	var want []configfile.Path
+	fields := map[string]Field{}
+	for _, sec := range f.Sections {
+		for _, fl := range sec.Fields {
+			if fl.ReadOnly || !fl.appliesTo(version, versions) {
+				continue
+			}
+			p := configfile.ParsePath(fl.Pointer)
+			want = append(want, p)
+			fields[p.String()] = fl
+		}
+	}
+
+	added := 0
+	for _, p := range want {
+		if _, have := d.Get(p); have {
+			continue
+		}
+		fl := fields[p.String()]
+		v, fromRef := ref.Get(p)
+		if !fromRef || v.Kind == configfile.KindOpaque {
+			// ref does not describe this one, so the schema's own default is all
+			// there is. Without one, nothing is known and nothing is written.
+			if fl.Default == nil {
+				continue
+			}
+			v = fl.Default.V
+		}
+		if !fl.Kind.accepts(v.Kind) {
+			// ref disagrees with the schema about what kind this setting is. One of
+			// the two is wrong, and writing either would be writing a guess.
+			continue
+		}
+		if err := checkFieldValue(fl, v); err != nil {
+			continue
+		}
+		ok, err := ensureContainers(d, ref, p)
+		if err != nil {
+			return added, fmt.Errorf("%s: %w", fl.Pointer, err)
+		}
+		if !ok {
+			continue
+		}
+		if err := d.Create(p, v); err != nil {
+			return added, fmt.Errorf("%s: %w", fl.Pointer, err)
+		}
+		added++
+	}
+	return added, nil
+}
+
+// ensureContainers adds the containers a path needs, from the outside in, and
+// reports whether the path can now be created. false means ref does not describe
+// some level of it, so there is nothing to copy and nothing to justify inventing.
+func ensureContainers(d, ref configfile.Doc, p configfile.Path) (bool, error) {
+	for i := 1; i < len(p); i++ {
+		if hasContainer(d, p[:i]) {
+			continue
+		}
+		if !hasContainer(ref, p[:i]) {
+			return false, nil
+		}
+		if err := d.CreateContainer(p[:i]); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// hasContainer reports whether a document holds a container at a path. It asks two
+// ways because the grammars disagree about what a container is: a JSON object and a
+// Lua table are values in their own right and answer to Get, while a Godot, ini or
+// TOML section is not a value at all and shows up only as the prefix of the paths
+// inside it.
+func hasContainer(d configfile.Doc, p configfile.Path) bool {
+	if len(p) == 0 {
+		return true // the file itself
+	}
+	if _, ok := d.Get(p); ok {
+		return true
+	}
+	for _, q := range d.Paths() {
+		if len(q) <= len(p) {
+			continue
+		}
+		if configfile.Path(q[:len(p)]).String() == p.String() {
+			return true
+		}
+	}
+	return false
 }

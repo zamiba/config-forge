@@ -40,6 +40,18 @@ const (
 	// JSON produces.
 	FormatJSON Format = "json"
 
+	// FormatSpaceSeparated is a settings file whose lines are a key and a value
+	// with whitespace between them, no sections and no equals sign — what a C
+	// program writes with fprintf and reads back with a tokeniser. A value of
+	// more than one token, such as a controller binding, is opaque.
+	FormatSpaceSeparated Format = "spaceSeparated"
+
+	// FormatTOML is TOML in the subset a settings file uses: `key = value` lines
+	// under optional [table] headers. An array, an inline table, a multi-line
+	// string and a date are located and reported as opaque rather than
+	// interpreted; an array of tables is refused, and the file with it.
+	FormatTOML Format = "toml"
+
 	// FormatLuaTable is a Lua data file — `return { key = value, … }` — in the
 	// restricted grammar a deterministic writer emits: keyed tables, numbers,
 	// booleans and quoted strings. It is not general Lua, and must not be.
@@ -124,6 +136,29 @@ func Int(i int64) Value     { return Value{Kind: KindInt, Int: i} }
 func Float(f float64) Value { return Value{Kind: KindFloat, Float: f} }
 func String(s string) Value { return Value{Kind: KindString, Str: s} }
 
+// Equal reports whether two values are the same value, whatever spelling each one
+// came from. Raw is deliberately not part of it: a 0 parsed out of a file carries
+// "0" and a 0 a schema declared carries nothing, and comparing the structs directly
+// would make those two different — which is how a select stops recognising the very
+// option the file is set to.
+func (v Value) Equal(w Value) bool {
+	if v.Kind != w.Kind {
+		return false
+	}
+	switch v.Kind {
+	case KindBool:
+		return v.Bool == w.Bool
+	case KindInt:
+		return v.Int == w.Int
+	case KindFloat:
+		return v.Float == w.Float
+	case KindString:
+		return v.Str == w.Str
+	}
+	// Two opaque values are only comparable as the text they are.
+	return v.Raw == w.Raw
+}
+
 // Display renders the value for a UI. For an opaque value that is its literal.
 func (v Value) Display() string {
 	switch v.Kind {
@@ -187,6 +222,20 @@ type Doc interface {
 	// its container is present, false when adding it would mean adding structure.
 	CanCreate(Path) bool
 
+	// CreateContainer adds an empty container — a section, a table, an object — so
+	// a leaf can then be added inside it. Its own container must already be there,
+	// so a caller adding a nested one works from the outside in.
+	//
+	// This is the one thing in this package that adds structure, and it exists for
+	// one caller: completing a program's config from a reference copy of that
+	// config which somebody authored from the program's own source. The rule it
+	// bends is real — a program reads its config into a fixed set of sections, and
+	// one it does not recognise can break that read — so the justification has to
+	// come from outside this package. A host that calls this without such a
+	// reference is guessing at the program's structure, which is exactly what
+	// Create refuses to do.
+	CreateContainer(Path) error
+
 	// Paths lists every value the file contains, in the order it declares them.
 	// It is what a host uses to report a schema field that no longer exists.
 	Paths() []Path
@@ -225,7 +274,7 @@ type NumberSetter interface {
 // against a grammar that has no such thing, before any file is opened.
 func UntypedNumbers(f Format) bool {
 	switch f {
-	case FormatJSON, FormatINI:
+	case FormatJSON, FormatINI, FormatSpaceSeparated:
 		return true
 	}
 	return false
@@ -253,6 +302,10 @@ func Parse(data []byte, format Format) (Doc, error) {
 		return parseINI(data)
 	case FormatJSON:
 		return parseJSON(data)
+	case FormatSpaceSeparated:
+		return parseSpaceSeparated(data)
+	case FormatTOML:
+		return parseTOML(data)
 	case FormatLuaTable:
 		return parseLuaTable(data)
 	}
@@ -260,7 +313,9 @@ func Parse(data []byte, format Format) (Doc, error) {
 }
 
 // Formats lists the formats this build implements.
-func Formats() []Format { return []Format{FormatGodot, FormatINI, FormatJSON, FormatLuaTable} }
+func Formats() []Format {
+	return []Format{FormatGodot, FormatINI, FormatJSON, FormatLuaTable, FormatSpaceSeparated, FormatTOML}
+}
 
 // Empty is a document that contains nothing: every Get reports absent and every
 // Set is refused.
@@ -289,6 +344,12 @@ func (emptyDoc) Create(p Path, _ Value) error {
 }
 
 func (emptyDoc) CanCreate(Path) bool { return false }
+
+// A file that is not there has nothing to add a container to; creating one would
+// be creating the file, which this package does not do.
+func (emptyDoc) CreateContainer(p Path) error {
+	return fmt.Errorf("%w: %s", ErrNoContainer, p)
+}
 
 // numeric reports whether a kind is a number, which is what SetNumber accepts on
 // both sides of the substitution it makes.

@@ -366,3 +366,110 @@ func TestJSONCreateAfterEditsLandsInsideTheObject(t *testing.T) {
 		}
 	}
 }
+
+// CreateContainer is the one thing here that adds structure. Each grammar renders
+// its own kind of empty container, and a grammar with no containers says so.
+func TestCreateContainerPerGrammar(t *testing.T) {
+	for name, tc := range map[string]struct {
+		format   Format
+		in, want string
+		at       Path
+		leaf     Path
+	}{
+		"godot section": {
+			FormatGodot,
+			"[video]\nmode=0\n",
+			"[video]\nmode=0\n\n[editor]\nautosave=5\n",
+			Path{"editor"}, Path{"editor", "autosave"},
+		},
+		"ini section": {
+			FormatINI,
+			"[RecompOne]\nVSync=True\n",
+			"[RecompOne]\nVSync=True\n\n[Audio]\nautosave=5\n",
+			Path{"Audio"}, Path{"Audio", "autosave"},
+		},
+		"toml table": {
+			FormatTOML,
+			"a = 1\n",
+			"a = 1\n\n[server]\nautosave = 5\n",
+			Path{"server"}, Path{"server", "autosave"},
+		},
+		"json object": {
+			FormatJSON,
+			"{\n    \"a\": 1\n}\n",
+			"{\n    \"a\": 1,\n    \"server\": { \"autosave\": 5 }\n}\n",
+			Path{"server"}, Path{"server", "autosave"},
+		},
+		"lua table": {
+			FormatLuaTable,
+			"return {\n  a = 1,\n}\n",
+			"return {\n  a = 1,\n  server = { autosave = 5 },\n}\n",
+			Path{"server"}, Path{"server", "autosave"},
+		},
+		"no final newline": {
+			FormatGodot,
+			"[video]\nmode=0",
+			"[video]\nmode=0\n\n[editor]\nautosave=5\n",
+			Path{"editor"}, Path{"editor", "autosave"},
+		},
+		"empty file": {
+			FormatGodot, "", "[editor]\nautosave=5\n",
+			Path{"editor"}, Path{"editor", "autosave"},
+		},
+	} {
+		d, err := Parse([]byte(tc.in), tc.format)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if err := d.CreateContainer(tc.at); err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if err := d.Create(tc.leaf, Int(5)); err != nil {
+			t.Errorf("%s: creating the leaf: %v\n%s", name, err, d.Bytes())
+			continue
+		}
+		if got := string(d.Bytes()); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", name, got, tc.want)
+		}
+		// The result is still the grammar it claims to be, and the leaf reads back.
+		back, err := Parse(d.Bytes(), tc.format)
+		if err != nil {
+			t.Errorf("%s: no longer parses: %v", name, err)
+			continue
+		}
+		if v, ok := back.Get(tc.leaf); !ok || v.Int != 5 {
+			t.Errorf("%s: leaf reads back as %+v", name, v)
+		}
+	}
+}
+
+func TestCreateContainerRefusesWhatItShould(t *testing.T) {
+	d := doc(t, smbr)
+	// A section that is already there.
+	if err := d.CreateContainer(Path{"video"}); !errors.Is(err, ErrAlreadyPresent) {
+		t.Errorf("err = %v, want ErrAlreadyPresent", err)
+	}
+	// A ConfigFile nests one level, so a deeper container is not a thing it has.
+	if err := d.CreateContainer(Path{"a", "b"}); !errors.Is(err, ErrNoContainer) {
+		t.Errorf("err = %v, want ErrNoContainer", err)
+	}
+	if err := d.CreateContainer(nil); !errors.Is(err, ErrNoContainer) {
+		t.Errorf("err = %v, want ErrNoContainer", err)
+	}
+
+	// A grammar with no containers at all.
+	ss, err := Parse([]byte("a 1\n"), FormatSpaceSeparated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ss.CreateContainer(Path{"x"}); !errors.Is(err, ErrNoContainer) {
+		t.Errorf("err = %v, want ErrNoContainer", err)
+	}
+
+	// And a file that is not there: adding a container would be creating the file.
+	if err := Empty().CreateContainer(Path{"x"}); !errors.Is(err, ErrNoContainer) {
+		t.Errorf("err = %v, want ErrNoContainer", err)
+	}
+}

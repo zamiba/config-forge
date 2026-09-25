@@ -275,7 +275,9 @@ func TestGodotPathsAreInDeclarationOrder(t *testing.T) {
 }
 
 func TestParseRejectsAnUnknownFormat(t *testing.T) {
-	if _, err := Parse([]byte("x = 1"), Format("toml")); err == nil {
+	// A name no grammar will ever have, so adding a format does not send this test
+	// looking for a new example.
+	if _, err := Parse([]byte("x = 1"), Format("not-a-grammar")); err == nil {
 		t.Error("an unimplemented format should be refused")
 	}
 }

@@ -17,6 +17,18 @@ import (
 // The directory is the host's convention, not this package's: PortForge keeps
 // them in a .configs folder beside the item's other metadata. Nothing here knows
 // that name.
+// SchemaSuffix is what names a schema in a config folder. Reading only these rather
+// than every .json gives the folder a contract instead of a convention: everything
+// else in it — a reference copy of a program's config, a capture from a real run,
+// anything somebody keeps beside them — is ignored rather than parsed as a schema and
+// failing. It also settles a real ambiguity, since a reference copy of a config file
+// that is itself JSON would otherwise sit beside a schema looking exactly like one.
+const SchemaSuffix = ".schema.json"
+
+func isSchemaName(name string) bool {
+	return len(name) > len(SchemaSuffix) && strings.EqualFold(name[len(name)-len(SchemaSuffix):], SchemaSuffix)
+}
+
 func LoadDir(dir string) ([]File, error) {
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
@@ -27,7 +39,7 @@ func LoadDir(dir string) ([]File, error) {
 	}
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
-		if e.IsDir() || !strings.EqualFold(filepath.Ext(e.Name()), ".json") {
+		if e.IsDir() || !isSchemaName(e.Name()) {
 			continue
 		}
 		names = append(names, e.Name())

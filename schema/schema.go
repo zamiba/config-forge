@@ -38,7 +38,101 @@ type File struct {
 	// extension is a different grammar in the next program.
 	Format configfile.Format `json:"format"`
 
+	// Reference names copies of this config file that the catalog ships beside the
+	// schema — complete files, authored from the program's own source, with every
+	// setting at the value the program itself uses. See Reference.
+	//
+	// It reads as a single object or as an array of them, because most programs
+	// need one and a program whose config changes shape between releases needs one
+	// per shape.
+	Reference References `json:"reference,omitempty"`
+
 	Sections []Section `json:"sections"`
+}
+
+// Reference is a copy of a config file, named by the schema that describes it.
+//
+// A reference copy is what makes two things possible that nothing should do on a
+// guess: adding a section the program has not written, and starting a config file
+// the program has never created. Both are copying rather than inventing, and the
+// copy is the whole of the justification — which is why this names a file the
+// catalog ships rather than holding the settings inline. A file can be diffed
+// against a config captured from a real run; a tree inside a schema cannot, and
+// that diff is the only way to tell a faithful copy from a plausible one.
+//
+// SinceVersion and UntilVersion limit it to a range of the program's releases, the
+// same way a field's do. A reference with neither is the author saying this shape
+// is right for every release the spec declares — which for a program with one
+// release is simply true, and for one with several is a claim only somebody who
+// knows the program can make. Several references are tried in declaration order,
+// so an unbounded one placed last reads as the fallback it is.
+type Reference struct {
+	// File is the name of the copy, beside the schema. A bare name, not a path:
+	// Path is where the *program* keeps its file and says nothing about where the
+	// catalog keeps this one.
+	File string `json:"file"`
+
+	SinceVersion string `json:"sinceVersion,omitempty"`
+	UntilVersion string `json:"untilVersion,omitempty"`
+}
+
+// References reads as one object or as an array of them, following the same two
+// spellings userDataPaths uses in a spec.
+type References []Reference
+
+func (r *References) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if strings.HasPrefix(trimmed, "[") {
+		var list []Reference
+		if err := json.Unmarshal(data, &list); err != nil {
+			return fmt.Errorf("reference: an array of objects with file, sinceVersion and untilVersion: %w", err)
+		}
+		*r = list
+		return nil
+	}
+	var one Reference
+	if err := json.Unmarshal(data, &one); err != nil {
+		return fmt.Errorf("reference: an object with file, sinceVersion and untilVersion, or an array of them: %w", err)
+	}
+	*r = References{one}
+	return nil
+}
+
+func (r References) MarshalJSON() ([]byte, error) {
+	if len(r) == 1 {
+		return json.Marshal(r[0])
+	}
+	return json.Marshal([]Reference(r))
+}
+
+// ReferenceFor is the copy that applies to a release, in declaration order.
+func (f File) ReferenceFor(version string, versions []string) (Reference, bool) {
+	for _, r := range f.Reference {
+		if r.appliesTo(version, versions) {
+			return r, true
+		}
+	}
+	return Reference{}, false
+}
+
+// appliesTo mirrors a field's version bounds: a bound naming a release the spec does
+// not declare is ignored rather than guessed at, and ValidateAgainstVersions is what
+// reports it.
+func (r Reference) appliesTo(version string, versions []string) bool {
+	if version == "" || len(versions) == 0 {
+		return true
+	}
+	at := indexOf(versions, version)
+	if at < 0 {
+		return true
+	}
+	if since := indexOf(versions, r.SinceVersion); since >= 0 && at < since {
+		return false
+	}
+	if until := indexOf(versions, r.UntilVersion); until >= 0 && at > until {
+		return false
+	}
+	return true
 }
 
 // Section groups fields under a heading, so a page can follow the file's own
@@ -267,6 +361,23 @@ func Validate(f File) []error {
 	}
 	if len(f.Sections) == 0 {
 		bad("%s: no sections, so the schema can reach nothing", f.Path)
+	}
+	seenRef := map[string]bool{}
+	for _, r := range f.Reference {
+		switch {
+		case strings.TrimSpace(r.File) == "":
+			bad("%s: a reference copy has no file", f.Path)
+		case strings.ContainsAny(r.File, `/\`), r.File == ".", r.File == "..":
+			bad("%s: a reference copy is a bare name beside the schema, not a path: %q", f.Path, r.File)
+		case isSchemaName(r.File):
+			// LoadDir reads these as schemas, so a reference named like one would be
+			// parsed as a schema and fail.
+			bad("%s: a reference copy must not be named %s, which is what a schema is: %q",
+				f.Path, SchemaSuffix, r.File)
+		case seenRef[r.File]:
+			bad("%s: the reference copy %q is named twice", f.Path, r.File)
+		}
+		seenRef[r.File] = true
 	}
 
 	seen := map[string]string{}

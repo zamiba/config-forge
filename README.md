@@ -67,6 +67,8 @@ schema expects int"* instead of corrupting the setting.
 | `ini` | A plain key/value config: `key = value` lines under optional `[section]` headers, `#` or `;` comments, untyped unquoted values |
 | `json` | Strict JSON with an object at its root: no comments, no trailing commas, no unquoted keys |
 | `luaTable` | A Lua data file — `return { key = value, … }` — in the restricted grammar a deterministic writer emits |
+| `spaceSeparated` | A key and a value with whitespace between them, one per line, no sections; a value of several tokens is opaque |
+| `toml` | TOML in the subset a settings file uses: `key = value` under optional `[table]` headers; arrays, inline tables, multi-line strings and dates are opaque, and `[[arrays of tables]]` are refused |
 
 One format per grammar, added when a program needs it, and only where a value's
 position in the file can be known exactly.
@@ -88,6 +90,14 @@ index would let a schema written against one release quietly rewrite the wrong s
 in the next, so a host shows the value and leaves it to the program. `null` is
 opaque too: the program chose to record the absence of a value, and which kind
 belongs there instead is not this package's guess.
+
+`toml` and `spaceSeparated` both measure what they will not rewrite as carefully as
+what they will, because both can hold a value that runs past the end of its own
+line — a multi-line array, a triple-quoted string — and a span that stopped at the
+newline would let a later edit land inside one. In `spaceSeparated` a value of
+several tokens is opaque for the same reason: a controller binding is three numbers
+on one line, and reading only the first would report it as a number and let
+something overwrite the rest.
 
 `ini` is the odd one out in that its values are not literals of any language, just
 text. The kind is read from that text, so a string whose text happens to read as a
@@ -134,7 +144,7 @@ unavailable at the default and `int` would refuse every value between. Whether t
 substitution is safe is a fact about the program rather than the grammar —
 libultraship's `Config::GetFloat` ignores a value that is not a JSON float, so
 there the strictness is exactly right — so `Validate` allows `number` only against
-a format whose numbers are untyped, and a Godot or Lua schema still has to say
+`json`, `ini` and `spaceSeparated`, the formats whose numbers are untyped, and a Godot or Lua schema still has to say
 which of the two a setting is.
 
 A `pointer` is dotted, which reaches the great majority of settings. Where a key
@@ -148,8 +158,18 @@ author fixing an entry sees the whole list. `ValidateAgainstVersions` additional
 checks that `sinceVersion` and `untilVersion` name releases that exist, which
 depends on the spec the schema is paired with.
 
-`Resolve` reads a schema against an open file and returns what to draw: the current
-value, whether the setting is present, whether it is editable, and if not, why.
+`Resolve` reads a schema against an open file and returns the state of every field:
+the current value, whether the setting is present, whether it is editable, and if
+not, why.
+
+**A field that is not editable is reported, not recommended.** Nobody can act on a
+row that says "this release stores this differently" — it is a fact about the
+schema, not a choice — so a host should leave such a field out of what it draws.
+They are reported because that is the only signal a schema has drifted away from
+its program, and the host is the thing that can log it. The same goes for authoring:
+**a schema should not name a setting it cannot edit.** A value that is opaque by
+nature, a controller binding, a per-device block — leave it out, or declare it
+`readOnly` if it is worth seeing.
 `WriteField` applies an edit through the field's own rules — a select's options, a
 slider's bounds, a toggle's two values — so a host cannot skip them by reaching for
 the `Doc` directly.
@@ -176,6 +196,70 @@ question in advance, so a host offers a setting as editable only where writing i
 would work. A field with no default is never created: the schema does not claim to
 know what the program does, so nothing is guessed.
 
+## Completing a config from a reference copy
+
+The rule above has a limit worth naming: a setting whose *section* the program has
+never written cannot be added at all, because adding the section would be inventing
+structure. For a program that writes its whole config every time this never comes
+up. For one that writes a section only once something in it is touched, it is most
+of the file.
+
+A **reference copy** resolves it. It is a complete copy of the config — every setting
+at the value the program itself uses — authored from the program's own source and
+shipped beside the schema, which names it:
+
+```json
+{
+  "path": "install/settings.cfg",
+  "format": "godot",
+  "reference": [
+    { "file": "settings.cfg.1.0.2.example", "untilVersion": "1.0.2" },
+    { "file": "settings.cfg.1.1 RC4.example", "sinceVersion": "1.1 RC4" }
+  ],
+  "sections": [ … ]
+}
+```
+
+A schema is named `<something>.schema.json`, and a directory of them is read with
+`LoadDir`, which reads only those. That gives the folder a contract rather than a
+convention: a reference copy sits beside the schemas without being mistaken for one,
+which matters most where a program's config is itself JSON — `shipofharkinian.json`
+alongside `shipofharkinian.schema.json` says plainly which is which.
+
+One object where one copy will do, an array where a program's config changes shape
+between releases. It is declared rather than found by a naming convention, so a schema
+can say it deliberately has none, one copy can cover a range of releases, and the
+relationship is a statement instead of a coincidence.
+
+Given one:
+
+- `ResolveWith` reports a setting whose section is missing as editable and `Unset`,
+  showing the value the reference holds.
+- `Complete` writes every setting the file does not hold yet, adding the sections it
+  needs by **copying them from the reference rather than inventing them**. That is
+  the whole of the justification, and it is why `CreateContainer` exists on `Doc` and
+  why nothing but this calls it.
+
+What gets written is bounded by the **schema**, not by the reference: a setting the
+reference holds that no field names is not written, and neither is one whose
+`sinceVersion`/`untilVersion` put it outside the installed release — so a reference
+taken from a newer build cannot drag that build's settings into an older one. Where
+the reference and the schema disagree about a setting's kind, neither value is
+written: one of them is wrong, and writing either would be writing a guess.
+
+A reference copy is also what lets a host start a config file the program has not
+created, by writing the reference's own bytes. This package still does not compose
+one: `Doc` has no way to produce a file, and the bytes in that case are the
+reference's.
+
+**Why a file and not a tree inside the schema.** The copy's authority is that it *is*
+a copy — which is what makes adding a section copying rather than inventing, and what
+lets somebody `diff` it against a config captured from a real run to see whether it is
+faithful or merely plausible. A tree inside a schema cannot be diffed against a real
+file, and turning one into a file would need a serialiser per grammar. That is the
+line this package has held since its first release, for the reason "Why not template
+the file" gives.
+
 ## What this package will not do
 
 - **Draw anything.** Widgets are names.
@@ -183,7 +267,8 @@ know what the program does, so nothing is guessed.
   it. Turning that into somewhere on disk is the host's job, and the host is the
   one that knows about profiles, storage units and per-platform folders.
 - **Author a file.** It adds settings inside a config file the program created; it
-  does not create the file, or a section or table within one.
+  does not create the file. It adds a section or table only by copying one from a
+  reference copy of that same config, never by composing one.
 - **Decide when to write.** A program that is running owns its config and may
   rewrite it at any moment. Refusing to edit a config while its program runs, and
   re-reading afterwards, is the host's responsibility.

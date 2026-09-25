@@ -383,6 +383,17 @@ func (d *jsonDoc) CanCreate(p Path) bool {
 }
 
 func (d *jsonDoc) Create(p Path, v Value) error {
+	lit, err := jsonLiteral(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", p, err)
+	}
+	return d.createLiteral(p, lit)
+}
+
+// CreateContainer adds an empty object, which a leaf can then be added inside.
+func (d *jsonDoc) CreateContainer(p Path) error { return d.createLiteral(p, "{}") }
+
+func (d *jsonDoc) createLiteral(p Path, lit string) error {
 	if len(p) == 0 || p[len(p)-1] == "" {
 		return fmt.Errorf("%w: %s", ErrNoSuchPath, p)
 	}
@@ -392,10 +403,6 @@ func (d *jsonDoc) Create(p Path, v Value) error {
 	start, end, ok := d.container(p)
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrNoContainer, Path(p[:len(p)-1]))
-	}
-	lit, err := jsonLiteral(v)
-	if err != nil {
-		return fmt.Errorf("%s: %w", p, err)
 	}
 	assign := jsonQuoteKey(p[len(p)-1]) + ": " + lit
 
@@ -603,4 +610,5 @@ func jsonLiteral(v Value) (string, error) {
 var (
 	_ NumberSetter = (*jsonDoc)(nil)
 	_ NumberSetter = (*iniDoc)(nil)
+	_ NumberSetter = (*spaceSepDoc)(nil)
 )
